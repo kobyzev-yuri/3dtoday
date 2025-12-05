@@ -1,6 +1,8 @@
 # Статус выполнения проекта 3dtoday
 
-**Дата обновления:** 2025-12-05
+**Дата обновления:** 2025-12-05 (вечер)
+
+**Текущий этап:** ШАГ 2 завершен, готовность к ШАГУ 3
 
 ---
 
@@ -34,7 +36,8 @@
 **Что сделано:**
 - ✅ Установлены зависимости (qdrant-client и др.)
 - ✅ Создан `llm_client.py` - универсальный клиент для LLM (Ollama/ProxyAPI)
-- ✅ Создан `vector_db.py` - клиент для Qdrant
+- ✅ Создан `vector_db.py` - клиент для Qdrant с поддержкой двух коллекций (текст/изображения)
+- ✅ Создан `openclip_embeddings.py` - интеграция OpenCLIP из sam2seg для эмбеддингов изображений
 - ✅ Создан `ollama_manager.py` - утилита для управления Ollama
 - ✅ Настроен Docker для Qdrant (docker-compose.yml)
 - ✅ Созданы скрипты управления (start_qdrant.sh, check_services.sh)
@@ -42,11 +45,17 @@
   - ✅ Qdrant - работает (запущен в Docker)
   - ✅ Ollama - работает (использует доступные модели)
   - ✅ ProxyAPI - работает корректно
+- ✅ Протестировано добавление статей и изображений в Qdrant:
+  - ✅ Текстовые эмбеддинги (768 dim) - Sentence Transformers
+  - ✅ Изображения эмбеддинги (512 dim) - OpenCLIP ViT-B-16/openai
+  - ✅ Отдельные коллекции для текста и изображений
 
 **Файлы:**
 - `backend/app/services/llm_client.py` ✅
-- `backend/app/services/vector_db.py` ✅
+- `backend/app/services/vector_db.py` ✅ (обновлен: поддержка двух коллекций)
+- `backend/app/services/openclip_embeddings.py` ✅ (новый: интеграция OpenCLIP)
 - `backend/app/services/test_connections.py` ✅
+- `backend/app/services/test_qdrant_indexing.py` ✅ (новый: тест индексации)
 - `backend/app/utils/ollama_manager.py` ✅
 - `docker-compose.yml` ✅
 - `scripts/start_qdrant.sh` ✅
@@ -56,7 +65,17 @@
 Qdrant          ✅ PASS
 Ollama          ✅ PASS  
 ProxyAPI        ✅ PASS
+Добавление статей в Qdrant    ✅ PASS
+Добавление изображений в Qdrant ✅ PASS
+OpenCLIP (ViT-B-16/openai)    ✅ PASS
 ```
+
+**Интеграция OpenCLIP (из sam2seg):**
+- ✅ Модель: ViT-B-16/openai (512 dim)
+- ✅ Поддержка эмбеддингов изображений
+- ✅ Отдельная коллекция в Qdrant для изображений (`kb_3dtoday_images`)
+- ✅ Текстовые эмбеддинги: Sentence Transformers (768 dim)
+- ✅ Изображения эмбеддинги: OpenCLIP (512 dim)
 
 ---
 
@@ -240,7 +259,6 @@ ProxyAPI        ✅ PASS
 
 ### Что нужно доработать:
 - ⚠️ Модель `llama3.1:70b` не установлена в Ollama (используется fallback на доступные модели)
-- ⚠️ Тест добавления статьи в Qdrant не прошел (нужно проверить формат данных)
 
 ### Полезные команды:
 

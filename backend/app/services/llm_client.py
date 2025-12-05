@@ -132,6 +132,7 @@ class LLMClient:
     ) -> str:
         """Генерация через Ollama"""
         try:
+            # Формируем сообщения для /api/chat
             messages = []
             
             if system_prompt:
@@ -139,16 +140,9 @@ class LLMClient:
             
             messages.append({"role": "user", "content": prompt})
             
-            # Ollama использует /api/generate для простых запросов
-            # Формируем промпт из сообщений
-            full_prompt = ""
-            if system_prompt:
-                full_prompt = f"System: {system_prompt}\n\n"
-            full_prompt += prompt
-            
             payload = {
                 "model": self.model,
-                "prompt": full_prompt,
+                "messages": messages,
                 "stream": False,
                 "options": {
                     "temperature": temperature or self.temperature
@@ -158,11 +152,13 @@ class LLMClient:
             if max_tokens:
                 payload["options"]["num_predict"] = max_tokens
             
-            response = await self.client.post("/api/generate", json=payload)
+            # Ollama использует /api/chat для чат-запросов
+            response = await self.client.post("/api/chat", json=payload)
             response.raise_for_status()
             
             result = response.json()
-            return result.get("response", "")
+            # Ollama возвращает {"message": {"role": "assistant", "content": "..."}}
+            return result.get("message", {}).get("content", "")
             
         except Exception as e:
             logger.error(f"❌ Ошибка генерации через Ollama: {e}")

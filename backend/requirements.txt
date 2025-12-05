@@ -35,6 +35,11 @@ pydantic>=2.0.0
 # Image processing (для Vision Agent)
 Pillow>=10.0.0
 
+# OpenCLIP для мультимодальных эмбеддингов (из sam2seg)
+open-clip-torch>=2.24.0
+torch>=2.0.0
+torchvision>=0.15.0
+
 # Logging
 python-json-logger>=2.0.7
 
