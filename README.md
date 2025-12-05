@@ -32,6 +32,8 @@ cp config.env.example config.env
 **Вариант 2: Через docker-compose**
 ```bash
 docker-compose up -d qdrant
+# или
+docker compose up -d qdrant
 ```
 
 **Вариант 3: Прямой запуск Docker**
@@ -44,14 +46,26 @@ docker run -d -p 6333:6333 --name qdrant_3dtoday qdrant/qdrant
 ./scripts/check_services.sh
 ```
 
-### 4. Запуск FastAPI сервера
+### 4. Запуск Ollama (если не запущен)
+
+```bash
+ollama serve
+```
+
+Или используйте утилиту из проекта:
+```python
+from backend.app.utils.ollama_manager import ensure_ollama_running
+ensure_ollama_running(start_if_not=True)
+```
+
+### 5. Запуск FastAPI сервера
 
 ```bash
 cd backend
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 5. Запуск Streamlit интерфейса
+### 6. Запуск Streamlit интерфейса
 
 ```bash
 cd frontend
@@ -75,6 +89,7 @@ streamlit run streamlit_app.py
 ├── knowledge_base/
 │   ├── articles/             # Статьи в JSON формате
 │   └── examples/             # Примеры Q/A пар
+├── scripts/                  # Скрипты для управления сервисами
 ├── config.env                # Конфигурация (не коммитится)
 └── README.md
 ```
@@ -99,10 +114,14 @@ streamlit run streamlit_app.py
 ## 🚀 Текущий статус
 
 **ШАГ 1:** ✅ Настройка проекта и структуры (завершен)
+**ШАГ 2:** 🔄 Базовая инфраструктура (в процессе)
 
-**Следующий шаг:** ШАГ 2 - Базовая инфраструктура
+**Следующий шаг:** ШАГ 3 - KB MCP Server
+
+## 🔗 GitHub
+
+Репозиторий: https://github.com/kobyzev-yuri/3dtoday.git
 
 ## 📝 Лицензия
 
 Проект для внутреннего использования.
-
