@@ -109,3 +109,5 @@ def ensure_ollama_running(start_if_not: bool = True) -> bool:
         logger.warning("⚠️  Ollama не запущен. Запустите: ollama serve")
         return False
 
+
+

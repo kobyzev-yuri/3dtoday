@@ -229,3 +229,5 @@ config.env
 - `config.env.example` — пример конфигурации
 - `RECOMMENDATIONS.md` — детальные рекомендации по архитектуре
 
+
+

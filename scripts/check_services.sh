@@ -43,3 +43,5 @@ else
     echo "  ❌ Docker не установлен"
 fi
 
+
+

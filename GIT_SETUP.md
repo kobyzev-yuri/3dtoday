@@ -57,3 +57,5 @@ git commit -m "Описание изменений"
 git push -u origin feature/kb-mcp-server
 ```
 
+
+

@@ -189,3 +189,5 @@ def get_openclip_embeddings(
     
     return _openclip_embeddings
 
+
+

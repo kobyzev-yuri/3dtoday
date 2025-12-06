@@ -546,3 +546,5 @@ def add_diagnostic_example(self, problem: str, solution: Dict, **kwargs):
 
 **Рекомендация:** Использовать sql4A как основу, адаптировать под домен 3D-печати. Это сэкономит ~2-3 недели разработки.
 
+
+

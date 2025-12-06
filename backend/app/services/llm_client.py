@@ -4,6 +4,7 @@
 
 import os
 import logging
+import httpx
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
@@ -16,12 +17,17 @@ logger = logging.getLogger(__name__)
 
 class LLMClient:
     """
-    Универсальный клиент для работы с LLM (Ollama или ProxyAPI/OpenAI)
+    Универсальный клиент для работы с LLM (Ollama, OpenAI или Gemini)
     """
     
-    def __init__(self):
-        """Инициализация клиента на основе конфигурации"""
-        self.provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    def __init__(self, provider: Optional[str] = None):
+        """
+        Инициализация клиента на основе конфигурации
+        
+        Args:
+            provider: Провайдер LLM (openai, ollama, gemini). Если не указан, используется из config.env
+        """
+        self.provider = (provider or os.getenv("LLM_PROVIDER", "ollama")).lower()
         self.client = None
         self._initialize_client()
     
@@ -31,16 +37,51 @@ class LLMClient:
             self._init_ollama()
         elif self.provider == "openai":
             self._init_openai()
+        elif self.provider == "gemini":
+            self._init_gemini()
         else:
             raise ValueError(f"Неизвестный провайдер LLM: {self.provider}")
+    
+    def _get_available_models(self) -> List[str]:
+        """Получение списка доступных моделей Ollama"""
+        try:
+            ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            response = httpx.get(f"{ollama_url}/api/tags", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                return [model["name"] for model in data.get("models", [])]
+            return []
+        except Exception:
+            return []
     
     def _init_ollama(self):
         """Инициализация Ollama клиента"""
         try:
-            import httpx
-            
             self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-            self.model = os.getenv("OLLAMA_MODEL", "llama3.1:70b")
+            configured_model = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+            
+            # Проверяем доступность модели, если нет - используем первую доступную qwen или первую в списке
+            try:
+                available_models = self._get_available_models()
+                if available_models:
+                    # Предпочитаем qwen модели
+                    qwen_models = [m for m in available_models if 'qwen' in m.lower()]
+                    preferred_models = qwen_models if qwen_models else available_models
+                    
+                    if configured_model not in available_models:
+                        fallback_model = preferred_models[0] if preferred_models else available_models[0]
+                        logger.warning(f"⚠️ Модель '{configured_model}' не найдена. Используем '{fallback_model}'")
+                        self.model = fallback_model
+                    else:
+                        self.model = configured_model
+                        logger.info(f"✅ Используется модель Ollama: {self.model}")
+                else:
+                    logger.warning(f"⚠️ Не удалось получить список моделей. Используем '{configured_model}'")
+                    self.model = configured_model
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось проверить доступные модели: {e}. Используем '{configured_model}'")
+                self.model = configured_model
+            
             self.temperature = float(os.getenv("OLLAMA_TEMPERATURE", "0.2"))
             self.timeout = int(os.getenv("OLLAMA_TIMEOUT", "500"))
             
@@ -67,7 +108,7 @@ class LLMClient:
             base_url = os.getenv("OPENAI_BASE_URL", "https://api.proxyapi.ru/openai/v1")
             self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
             self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.2"))
-            self.timeout = int(os.getenv("OPENAI_TIMEOUT", "60"))
+            self.timeout = int(os.getenv("OPENAI_TIMEOUT", "600"))
             
             if not api_key:
                 raise ValueError("OPENAI_API_KEY не установлен в config.env")
@@ -84,10 +125,41 @@ class LLMClient:
             logger.error(f"❌ Ошибка инициализации OpenAI: {e}")
             raise
     
+    def _init_gemini(self):
+        """Инициализация Gemini/ProxyAPI клиента через REST API"""
+        try:
+            api_key = os.getenv("GEMINI_API_KEY")
+            base_url = os.getenv("GEMINI_BASE_URL", "https://api.proxyapi.ru/google")
+            self.model = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+            self.temperature = float(os.getenv("GEMINI_TEMPERATURE", "0.2"))
+            self.timeout = int(os.getenv("GEMINI_TIMEOUT", "120"))
+            
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY не установлен в config.env")
+            
+            # ProxyAPI.ru использует REST API напрямую
+            # Формат: https://api.proxyapi.ru/google/v1beta/models/{model}:generateContent
+            self.api_key = api_key
+            self.base_url = base_url.rstrip('/')
+            
+            # Создаем HTTP клиент для ProxyAPI
+            self.client = httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=self.timeout,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            logger.info(f"✅ Gemini/ProxyAPI клиент инициализирован (model={self.model}, base_url={self.base_url})")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка инициализации Gemini: {e}")
+            raise
+    
     def _check_ollama_available(self):
         """Проверка доступности Ollama сервера"""
-        import httpx
-        
         try:
             response = httpx.get(f"{self.ollama_url}/api/tags", timeout=5)
             if response.status_code == 200:
@@ -120,8 +192,12 @@ class LLMClient:
         """
         if self.provider == "ollama":
             return await self._generate_ollama(prompt, system_prompt, temperature, max_tokens)
-        else:
+        elif self.provider == "openai":
             return await self._generate_openai(prompt, system_prompt, temperature, max_tokens)
+        elif self.provider == "gemini":
+            return await self._generate_gemini(prompt, system_prompt, temperature, max_tokens)
+        else:
+            raise ValueError(f"Неизвестный провайдер: {self.provider}")
     
     async def _generate_ollama(
         self,
@@ -132,17 +208,50 @@ class LLMClient:
     ) -> str:
         """Генерация через Ollama"""
         try:
-            # Формируем сообщения для /api/chat
-            messages = []
+            # Пробуем сначала /api/chat (новый API)
+            try:
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                
+                payload = {
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature or self.temperature
+                    }
+                }
+                
+                if max_tokens:
+                    payload["options"]["num_predict"] = max_tokens
+                
+                logger.debug(f"📤 Ollama запрос к /api/chat: model={self.model}")
+                response = await self.client.post("/api/chat", json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                content = result.get("message", {}).get("content", "")
+                if content:
+                    logger.debug(f"✅ Ollama ответ получен ({len(content)} символов)")
+                    return content
+                    
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    logger.warning(f"⚠️ /api/chat не поддерживается, пробуем /api/generate")
+                    # Fallback на старый API /api/generate
+                else:
+                    raise
             
+            # Fallback: используем старый API /api/generate
+            full_prompt = prompt
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            
-            messages.append({"role": "user", "content": prompt})
+                full_prompt = f"{system_prompt}\n\n{prompt}"
             
             payload = {
                 "model": self.model,
-                "messages": messages,
+                "prompt": full_prompt,
                 "stream": False,
                 "options": {
                     "temperature": temperature or self.temperature
@@ -152,16 +261,20 @@ class LLMClient:
             if max_tokens:
                 payload["options"]["num_predict"] = max_tokens
             
-            # Ollama использует /api/chat для чат-запросов
-            response = await self.client.post("/api/chat", json=payload)
+            logger.debug(f"📤 Ollama запрос к /api/generate: model={self.model}")
+            response = await self.client.post("/api/generate", json=payload)
             response.raise_for_status()
             
             result = response.json()
-            # Ollama возвращает {"message": {"role": "assistant", "content": "..."}}
-            return result.get("message", {}).get("content", "")
+            content = result.get("response", "")
+            logger.debug(f"✅ Ollama ответ получен через /api/generate ({len(content)} символов)")
+            return content
             
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ HTTP ошибка Ollama: {e.response.status_code} - {e.response.text[:200]}")
+            raise
         except Exception as e:
-            logger.error(f"❌ Ошибка генерации через Ollama: {e}")
+            logger.error(f"❌ Ошибка генерации через Ollama: {e}", exc_info=True)
             raise
     
     async def _generate_openai(
@@ -180,17 +293,102 @@ class LLMClient:
             
             messages.append({"role": "user", "content": prompt})
             
+            logger.debug(f"📤 OpenAI запрос: model={self.model}, timeout={self.timeout}s, prompt_len={len(prompt)}")
+            
+            # Передаем timeout в метод create() как в sql4A
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=temperature or self.temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens or 2000,  # Ограничиваем max_tokens для ускорения
+                timeout=self.timeout  # Явно передаем timeout в запрос
             )
             
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            logger.debug(f"✅ OpenAI ответ получен ({len(content)} символов)")
+            return content
             
         except Exception as e:
             logger.error(f"❌ Ошибка генерации через OpenAI: {e}")
+            raise
+    
+    async def _generate_gemini(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ) -> str:
+        """Генерация через Gemini/ProxyAPI через REST API"""
+        try:
+            # Формируем содержимое запроса
+            parts = [{"text": prompt}]
+            
+            # Формируем запрос согласно документации ProxyAPI
+            # https://api.proxyapi.ru/google/v1beta/models/{model}:generateContent
+            request_data = {
+                "contents": [{
+                    "parts": parts
+                }],
+                "generationConfig": {
+                    "temperature": temperature or self.temperature,
+                    "maxOutputTokens": max_tokens or 8000,  # Увеличено для Gemini 3 Pro
+                }
+            }
+            
+            # Добавляем system instruction если есть
+            if system_prompt:
+                request_data["systemInstruction"] = {
+                    "parts": [{"text": system_prompt}]
+                }
+            
+            # Формируем URL для ProxyAPI
+            # Формат модели: gemini-3-pro-preview -> models/gemini-3-pro-preview:generateContent
+            model_endpoint = f"/v1beta/models/{self.model}:generateContent"
+            
+            logger.debug(f"📤 Gemini запрос к ProxyAPI: {self.base_url}{model_endpoint}")
+            
+            response = await self.client.post(
+                model_endpoint,
+                json=request_data
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Извлекаем текст из ответа
+            # Формат ответа: {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
+            candidates = result.get("candidates", [])
+            if candidates:
+                candidate = candidates[0]
+                finish_reason = candidate.get("finishReason", "")
+                
+                # Проверяем причину завершения
+                if finish_reason == "MAX_TOKENS":
+                    logger.warning(f"⚠️ Gemini достиг лимита токенов (finishReason: {finish_reason})")
+                
+                content = candidate.get("content", {})
+                parts = content.get("parts", [])
+                if parts:
+                    text = parts[0].get("text", "")
+                    if text:
+                        logger.debug(f"✅ Gemini ответ получен ({len(text)} символов)")
+                        return text
+                    else:
+                        logger.warning(f"⚠️ Gemini вернул пустой текст (finishReason: {finish_reason})")
+                        # Если текст пустой, но есть finishReason, возвращаем сообщение об ошибке
+                        if finish_reason:
+                            raise Exception(f"Gemini вернул пустой ответ (finishReason: {finish_reason}). Попробуйте увеличить maxOutputTokens.")
+                else:
+                    logger.warning(f"⚠️ Gemini не вернул parts в content (finishReason: {finish_reason})")
+            
+            raise Exception(f"Пустой ответ от Gemini. Ответ: {result}")
+            
+        except httpx.HTTPError as e:
+            logger.error(f"❌ HTTP ошибка Gemini: {e.response.status_code if hasattr(e, 'response') else 'unknown'} - {e.response.text[:200] if hasattr(e, 'response') else str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Ошибка генерации через Gemini: {e}")
             raise
     
     async def generate_json(
@@ -234,12 +432,27 @@ class LLMClient:
 _llm_client_instance: Optional[LLMClient] = None
 
 
-def get_llm_client() -> LLMClient:
-    """Получить экземпляр LLM клиента (singleton)"""
+def get_llm_client(provider: Optional[str] = None) -> LLMClient:
+    """
+    Получить экземпляр LLM клиента (singleton)
+    
+    Args:
+        provider: Провайдер LLM. Если указан и отличается от текущего, синглтон будет переинициализирован
+    """
     global _llm_client_instance
     
+    # Если указан провайдер и он отличается от текущего, переинициализируем
+    if provider and (_llm_client_instance is None or _llm_client_instance.provider != provider.lower()):
+        _llm_client_instance = None
+    
     if _llm_client_instance is None:
-        _llm_client_instance = LLMClient()
+        _llm_client_instance = LLMClient(provider=provider)
     
     return _llm_client_instance
+
+
+def reset_llm_client():
+    """Сбросить синглтон LLM клиента (для переинициализации с новыми настройками)"""
+    global _llm_client_instance
+    _llm_client_instance = None
 

@@ -1,0 +1,984 @@
+"""
+Streamlit интерфейс для администраторов KB
+Работает через FastAPI
+"""
+
+import streamlit as st
+import httpx
+import asyncio
+import os
+from typing import Optional, Dict, Any
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Загрузка конфигурации
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / "config.env")
+
+# Конфигурация API
+API_BASE_URL = "http://localhost:8000"
+
+# Настройка страницы
+st.set_page_config(
+    page_title="Управление KB - 3dtoday",
+    page_icon="📚",
+    layout="wide"
+)
+
+st.title("📚 Управление базой знаний")
+st.markdown("---")
+
+# Боковая панель
+with st.sidebar:
+    st.header("⚙️ Настройки")
+    
+    # Инициализация session state для настроек
+    if "relevance_threshold" not in st.session_state:
+        st.session_state.relevance_threshold = 0.6
+    if "admin_decision" not in st.session_state:
+        st.session_state.admin_decision = None
+    
+    # Настройки KB
+    st.subheader("📊 Настройки KB")
+    
+    relevance_threshold = st.slider(
+        "Порог релевантности",
+        min_value=0.0,
+        max_value=1.0,
+        value=st.session_state.relevance_threshold,
+        step=0.05,
+        help="Минимальный порог релевантности для автоматического одобрения статьи (0.0-1.0)"
+    )
+    st.session_state.relevance_threshold = relevance_threshold
+    
+    st.markdown("---")
+    
+    # Выбор LLM провайдера и модели
+    st.subheader("🤖 LLM Провайдер")
+    
+    # Загружаем значения из config.env
+    default_provider = os.getenv("LLM_PROVIDER", "ollama")
+    default_ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+    default_openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+    default_gemini_model = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+    
+    # Проверяем, используется ли ProxyAPI
+    openai_base_url = os.getenv("OPENAI_BASE_URL", "")
+    gemini_base_url = os.getenv("GEMINI_BASE_URL", "")
+    uses_proxyapi_openai = "proxyapi.ru" in openai_base_url.lower()
+    uses_proxyapi_gemini = "proxyapi.ru" in gemini_base_url.lower()
+    
+    llm_provider = st.selectbox(
+        "Провайдер:",
+        ["openai", "ollama", "gemini"],
+        index=["openai", "ollama", "gemini"].index(default_provider) if default_provider in ["openai", "ollama", "gemini"] else 1,
+        format_func=lambda x: {
+            "openai": f"GPT-4o ({'ProxyAPI.ru' if uses_proxyapi_openai else 'OpenAI'}) - {default_openai_model}",
+            "ollama": f"Ollama - {default_ollama_model}",
+            "gemini": f"Gemini ({'ProxyAPI.ru' if uses_proxyapi_gemini else 'Google'}) - {default_gemini_model}"
+        }.get(x, x),
+        help="Выберите провайдер LLM для анализа документов"
+    )
+    
+    # Выбор модели в зависимости от провайдера
+    if llm_provider == "openai":
+        openai_models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+        selected_model = st.selectbox(
+            "Модель OpenAI:",
+            openai_models,
+            index=openai_models.index(default_openai_model) if default_openai_model in openai_models else 0
+        )
+    elif llm_provider == "ollama":
+        # Получаем доступные модели Ollama
+        try:
+            with httpx.Client(timeout=5) as client:
+                response = client.get("http://localhost:11434/api/tags")
+                if response.status_code == 200:
+                    data = response.json()
+                    available_models = [m["name"] for m in data.get("models", [])]
+                    if available_models:
+                        # Предпочитаем qwen и llava модели
+                        qwen_models = [m for m in available_models if 'qwen' in m.lower()]
+                        llava_models = [m for m in available_models if 'llava' in m.lower()]
+                        preferred = qwen_models + llava_models + [m for m in available_models if m not in qwen_models + llava_models]
+                        
+                        # Определяем индекс выбранной модели
+                        current_model = default_ollama_model
+                        if current_model not in preferred:
+                            current_model = preferred[0] if preferred else available_models[0]
+                        
+                        selected_model = st.selectbox(
+                            "Модель Ollama:",
+                            preferred if preferred else available_models,
+                            index=preferred.index(current_model) if current_model in preferred else 0,
+                            help=f"Доступно моделей: {len(available_models)}"
+                        )
+                    else:
+                        selected_model = st.text_input(
+                            "Модель Ollama:",
+                            value=default_ollama_model,
+                            help="Модели не найдены. Введите название модели вручную"
+                        )
+                else:
+                    selected_model = st.text_input(
+                        "Модель Ollama:",
+                        value=default_ollama_model,
+                        help="Не удалось получить список моделей. Введите название модели вручную"
+                    )
+        except Exception as e:
+            selected_model = st.text_input(
+                "Модель Ollama:",
+                value=default_ollama_model,
+                help=f"Ошибка получения моделей: {e}. Введите название модели вручную"
+            )
+    else:  # gemini
+        gemini_models = ["gemini-3-pro-preview", "gemini-pro", "gemini-1.5-pro"]
+        selected_model = st.selectbox(
+            "Модель Gemini:",
+            gemini_models,
+            index=gemini_models.index(default_gemini_model) if default_gemini_model in gemini_models else 0
+        )
+    
+    st.markdown("---")
+    
+    # Настройки таймаутов
+    st.subheader("⏱️ Таймауты (сек)")
+    
+    default_timeouts = {
+        "API запросы": int(os.getenv("API_REQUEST_TIMEOUT", "300")),  # Увеличено для сложных операций
+        "Парсинг документов": int(os.getenv("DOCUMENT_PARSER_TIMEOUT", "60")),
+        "LLM генерация (Ollama)": int(os.getenv("OLLAMA_TIMEOUT", "500")),
+        "LLM генерация (OpenAI)": int(os.getenv("OPENAI_TIMEOUT", "120")),  # Увеличено для GPT-4o
+        "MCP сервер": int(os.getenv("MCP_SERVER_TIMEOUT", "300")),  # Увеличено для полного цикла
+        "RAG поиск": int(os.getenv("RAG_SEARCH_TIMEOUT", "30")),
+        "Health check": int(os.getenv("HEALTH_CHECK_TIMEOUT", "10"))
+    }
+    
+    timeout_values = {}
+    for timeout_name, default_value in default_timeouts.items():
+        timeout_values[timeout_name] = st.number_input(
+            timeout_name,
+            min_value=5,
+            max_value=600,
+            value=default_value,
+            step=5,
+            key=f"timeout_{timeout_name}"
+        )
+    
+    # Сохранение в session state
+    st.session_state.llm_provider = llm_provider
+    st.session_state.selected_model = selected_model
+    st.session_state.timeout_values = timeout_values
+    
+    st.markdown("---")
+    
+    st.header("📊 Статистика KB")
+    
+    if st.button("🔄 Обновить статистику"):
+        try:
+            health_timeout = timeout_values.get("Health check", int(os.getenv("HEALTH_CHECK_TIMEOUT", "10")))
+            with httpx.Client(timeout=health_timeout) as client:
+                response = client.get(f"{API_BASE_URL}/api/kb/statistics")
+                if response.status_code == 200:
+                    stats = response.json()
+                    st.success("✅ Статистика обновлена")
+                    st.metric("Статей", stats.get("text_articles", 0))
+                    st.metric("Изображений", stats.get("images", 0))
+                    st.metric("Всего векторов", stats.get("total_vectors", 0))
+        except Exception as e:
+            st.error(f"❌ Ошибка: {e}")
+    
+    st.markdown("---")
+    st.info("💡 Используйте форму ниже для добавления статей в KB")
+
+# Основной интерфейс
+st.subheader("📝 Добавление статьи в KB")
+
+# Выбор способа ввода
+input_method = st.radio(
+    "Способ добавления документа:",
+    ["🔗 По URL/Файлу (автоматический парсинг)", "🤖 По URL (через LLM - GPT-4o/Gemini)", "📝 Ручной ввод", "📄 Импорт из JSON"],
+    horizontal=True
+)
+
+st.markdown("---")
+
+if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
+    # Парсинг через LLM напрямую
+    st.info("💡 **Новый метод**: LLM сам загружает контент и формирует JSON для KB")
+    st.info("📋 Поддерживается: GPT-4o (OpenAI/ProxyAPI) и Gemini 3")
+    
+    with st.form("llm_url_form"):
+        source = st.text_input(
+            "URL документа",
+            placeholder="https://3dtoday.ru/...",
+            help="LLM сам загрузит и проанализирует страницу"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            llm_provider_choice = st.selectbox(
+                "LLM провайдер:",
+                ["openai", "gemini"],
+                index=0,
+                help="GPT-4o или Gemini 3"
+            )
+        with col2:
+            if llm_provider_choice == "openai":
+                model_choice = st.selectbox(
+                    "Модель:",
+                    ["gpt-4o", "gpt-4-turbo"],
+                    index=0
+                )
+            else:
+                model_choice = st.selectbox(
+                    "Модель:",
+                    ["gemini-3-pro-preview", "gemini-pro"],
+                    index=0
+                )
+        
+        submitted_llm = st.form_submit_button("🤖 Анализировать через LLM", type="primary", use_container_width=True)
+    
+    if submitted_llm and source:
+        api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
+        actual_timeout = max(api_timeout, 300)
+        
+        with st.spinner(f"🤖 LLM анализирует URL... (это может занять время, таймаут: {actual_timeout} сек)"):
+            try:
+                with httpx.Client(timeout=float(actual_timeout)) as client:
+                    response = client.post(
+                        f"{API_BASE_URL}/api/kb/articles/parse_with_llm",
+                        json={
+                            "url": source,
+                            "llm_provider": llm_provider_choice,
+                            "model": model_choice
+                        },
+                        timeout=float(actual_timeout)
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        parsed_document = result.get("parsed_document", {})
+                        
+                        st.success(f"✅ URL успешно проанализирован через {llm_provider_choice.upper()} ({result.get('model', 'unknown')})!")
+                        
+                        # Отображение результата
+                        st.subheader("📄 Результат анализа LLM")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**Заголовок:**", parsed_document.get("title", ""))
+                            st.write("**Раздел:**", parsed_document.get("section", "unknown"))
+                            st.write("**Тип контента:**", parsed_document.get("content_type", "article"))
+                            st.write("**Релевантность:**", f"{parsed_document.get('relevance_score', 0):.2f}")
+                            st.write("**Качество:**", f"{parsed_document.get('quality_score', 0):.2f}")
+                        
+                        with col2:
+                            st.write("**URL:**", parsed_document.get("url", source))
+                            st.write("**Дата:**", parsed_document.get("date", ""))
+                            if parsed_document.get("author"):
+                                st.write("**Автор:**", parsed_document["author"])
+                            if parsed_document.get("tags"):
+                                st.write("**Теги:**", ", ".join(parsed_document["tags"]))
+                        
+                        # Abstract
+                        if parsed_document.get("abstract"):
+                            st.subheader("📝 Abstract")
+                            st.info(parsed_document["abstract"])
+                        
+                        # Содержимое
+                        if parsed_document.get("content"):
+                            with st.expander("📄 Содержимое"):
+                                st.markdown(parsed_document["content"][:2000] + "..." if len(parsed_document["content"]) > 2000 else parsed_document["content"])
+                        
+                        # Детали
+                        if parsed_document.get("problem"):
+                            st.subheader("🔍 Детали")
+                            st.write("**Проблема:**", parsed_document["problem"])
+                            
+                            if parsed_document.get("symptoms"):
+                                st.write("**Симптомы:**")
+                                for symptom in parsed_document["symptoms"]:
+                                    st.write(f"- {symptom}")
+                            
+                            if parsed_document.get("solutions"):
+                                st.write("**Решения:**")
+                                for i, solution in enumerate(parsed_document["solutions"], 1):
+                                    if isinstance(solution, dict):
+                                        st.write(f"{i}. {solution.get('description', '')}")
+                                    else:
+                                        st.write(f"{i}. {solution}")
+                        
+                        # Решение администратора
+                        st.markdown("---")
+                        st.subheader("👤 Решение администратора")
+                        
+                        if "admin_decision" not in st.session_state or st.session_state.admin_decision is None:
+                            is_relevant = parsed_document.get("is_relevant", False)
+                            st.session_state.admin_decision = "approve" if is_relevant else "needs_review"
+                        
+                        admin_decision = st.radio(
+                            "Ваше решение:",
+                            ["approve", "reject", "needs_review"],
+                            index=["approve", "reject", "needs_review"].index(st.session_state.admin_decision) if st.session_state.admin_decision in ["approve", "reject", "needs_review"] else 0,
+                            format_func=lambda x: {
+                                "approve": "✅ Одобрить и добавить в KB",
+                                "reject": "❌ Отклонить",
+                                "needs_review": "⚠️ Требуется дополнительная проверка"
+                            }.get(x, x)
+                        )
+                        
+                        st.session_state.admin_decision = admin_decision
+                        
+                        # Кнопка добавления
+                        if admin_decision == "approve":
+                            if st.button("✅ Добавить в KB", type="primary", use_container_width=True):
+                                try:
+                                    with httpx.Client(timeout=float(api_timeout)) as add_client:
+                                        add_response = add_client.post(
+                                            f"{API_BASE_URL}/api/kb/articles/add_from_parse",
+                                            json={
+                                                "parsed_document": parsed_document,
+                                                "review": {
+                                                    "decision": "approve",
+                                                    "relevance_score": parsed_document.get("relevance_score", 0.0),
+                                                    "quality_score": parsed_document.get("quality_score", 0.0),
+                                                    "summary": parsed_document
+                                                },
+                                                "admin_decision": admin_decision,
+                                                "relevance_threshold": st.session_state.relevance_threshold
+                                            },
+                                            timeout=float(api_timeout)
+                                        )
+                                        
+                                        if add_response.status_code == 200:
+                                            result = add_response.json()
+                                            st.success(f"✅ Статья успешно добавлена в KB! ID: {result.get('article_id', 'unknown')}")
+                                            if "admin_decision" in st.session_state:
+                                                del st.session_state.admin_decision
+                                            st.rerun()
+                                        else:
+                                            error_detail = add_response.json().get('detail', add_response.text)
+                                            st.error(f"❌ Ошибка добавления: {error_detail}")
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка подключения к API: {e}")
+                    else:
+                        error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                        st.error(f"❌ Ошибка анализа через LLM: {error_detail}")
+                        
+            except Exception as e:
+                st.error(f"❌ Ошибка подключения к API: {e}")
+                st.info("💡 Убедитесь, что FastAPI сервер запущен")
+
+elif input_method == "🔗 По URL/Файлу (автоматический парсинг)":
+    # Парсинг по URL или файлу
+    with st.form("url_form", clear_on_submit=False):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            source = st.text_input(
+                "URL или путь к файлу *",
+                placeholder="https://3dtoday.ru/... или /path/to/file.pdf"
+            )
+        
+        with col2:
+            source_type = st.selectbox(
+                "Тип источника (автоопределение если не указан)",
+                ["auto", "html", "pdf", "json", "url"],
+                help="auto - автоматическое определение типа"
+            )
+        
+        st.info("💡 Поддерживаются: HTML/URL, PDF документы, JSON файлы")
+        
+        submitted_url = st.form_submit_button("📥 Скачать и проанализировать документ", use_container_width=True)
+    
+    if submitted_url and source:
+        api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
+        mcp_timeout = st.session_state.get("timeout_values", {}).get("MCP сервер", int(os.getenv("MCP_SERVER_TIMEOUT", "300")))
+        
+        # Увеличиваем таймаут для сложных операций
+        # GPT-4o может работать медленнее, Ollama тоже может требовать больше времени
+        actual_timeout = max(api_timeout, 300)  # Минимум 5 минут
+        
+        with st.spinner(f"📥 Скачивание и анализ статьи... (таймаут: {actual_timeout} сек)"):
+            try:
+                with httpx.Client(timeout=float(actual_timeout)) as client:
+                    response = client.post(
+                        f"{API_BASE_URL}/api/kb/articles/parse",
+                        json={
+                            "source": source,
+                            "source_type": source_type if source_type != "auto" else None,
+                            "llm_provider": st.session_state.get("llm_provider", os.getenv("LLM_PROVIDER", "ollama")),
+                            "model": st.session_state.get("selected_model", os.getenv("OLLAMA_MODEL", "qwen3:8b")),
+                            "timeout": mcp_timeout
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        parsed_document = result.get("parsed_document", {})
+                        review = result.get("review", {})
+                        summary = review.get("summary", {})
+                        
+                        # Сохранение в session state для дальнейшей обработки
+                        st.session_state.parsed_document = parsed_document
+                        st.session_state.review = review
+                        st.session_state.summary = summary
+                        st.session_state.document_source = source
+                        
+                        st.success("✅ Документ успешно скачан и проанализирован!")
+                        
+                        # Решение библиотекаря
+                        decision = review.get("decision", "needs_review")
+                        reason = review.get("reason", "")
+                        relevance_score = review.get("relevance_score", 0.0)
+                        quality_score = review.get("quality_score", 0.0)
+                        
+                        st.subheader("📋 Решение библиотекаря")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            if decision == "approve":
+                                st.success(f"✅ **Одобрено**")
+                            elif decision == "reject":
+                                st.error(f"❌ **Отклонено**")
+                            else:
+                                st.warning(f"⚠️ **Требуется проверка**")
+                        
+                        with col2:
+                            threshold = st.session_state.relevance_threshold
+                            threshold_color = "normal" if relevance_score >= threshold else "inverse"
+                            st.metric(
+                                "Релевантность",
+                                f"{relevance_score:.2f}",
+                                delta=f"Порог: {threshold:.2f}",
+                                delta_color=threshold_color
+                            )
+                        
+                        with col3:
+                            st.metric("Качество", f"{quality_score:.2f}")
+                        
+                        st.info(f"**Причина:** {reason}")
+                        
+                        # Решение администратора
+                        st.markdown("---")
+                        st.subheader("👤 Решение администратора")
+                        
+                        # Инициализация admin_decision из session_state или из решения библиотекаря
+                        if "admin_decision" not in st.session_state or st.session_state.admin_decision is None:
+                            st.session_state.admin_decision = decision
+                        
+                        admin_decision = st.radio(
+                            "Ваше решение:",
+                            ["approve", "reject", "needs_review"],
+                            index=["approve", "reject", "needs_review"].index(st.session_state.admin_decision) if st.session_state.admin_decision in ["approve", "reject", "needs_review"] else 2,
+                            format_func=lambda x: {
+                                "approve": "✅ Одобрить и добавить в KB",
+                                "reject": "❌ Отклонить",
+                                "needs_review": "⚠️ Требуется дополнительная проверка"
+                            }.get(x, x),
+                            help="Вы можете переопределить решение библиотекаря"
+                        )
+                        
+                        st.session_state.admin_decision = admin_decision
+                        
+                        # Предупреждение если решение переопределено
+                        if admin_decision != decision:
+                            if admin_decision == "approve" and decision == "reject":
+                                st.warning("⚠️ Вы одобряете статью, отклоненную библиотекарем")
+                            elif admin_decision == "reject" and decision == "approve":
+                                st.warning("⚠️ Вы отклоняете статью, одобренную библиотекарем")
+                        
+                        # Предупреждение если релевантность ниже порога
+                        if relevance_score < st.session_state.relevance_threshold and admin_decision == "approve":
+                            st.warning(
+                                f"⚠️ Релевантность ({relevance_score:.2f}) ниже установленного порога "
+                                f"({st.session_state.relevance_threshold:.2f})"
+                            )
+                        
+                        # Проверка на дублирование
+                        duplicate_check = review.get("duplicate_check", {})
+                        if duplicate_check.get("is_duplicate"):
+                            st.warning("⚠️ **Обнаружены похожие документы в KB:**")
+                            for i, similar_title in enumerate(duplicate_check.get("similar_docs", [])[:3], 1):
+                                st.write(f"{i}. {similar_title}")
+                        
+                        # Abstract
+                        abstract = review.get("abstract", "")
+                        if abstract:
+                            st.subheader("📝 Abstract (краткое изложение)")
+                            st.info(abstract)
+                        
+                        st.markdown("---")
+                        
+                        # Отображение результатов
+                        st.subheader("📄 Распарсенный документ")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**Заголовок:**", parsed_document.get("title", ""))
+                            st.write("**Тип контента:**", parsed_document.get("content_type", "article"))
+                            st.write("**Раздел:**", parsed_document.get("section", "unknown"))
+                            st.write("**Дата:**", parsed_document.get("date", ""))
+                            if parsed_document.get("author"):
+                                st.write("**Автор:**", parsed_document["author"])
+                        
+                        with col2:
+                            st.write("**Источник:**", source[:100] if len(source) > 100 else source)
+                            if parsed_document.get("url"):
+                                st.write("**URL:**", parsed_document["url"])
+                            if parsed_document.get("tags"):
+                                st.write("**Теги:**", ", ".join(parsed_document["tags"]))
+                            st.write("**Изображений:**", len(parsed_document.get("images", [])))
+                        
+                        # Краткое изложение от агента-библиотекаря
+                        st.subheader("📋 Краткое изложение (от агента-библиотекаря)")
+                        
+                        content_type = summary.get("content_type", "article") if summary else "article"
+                        st.info(f"**Тип контента:** {content_type}")
+                        
+                        if summary:
+                            st.markdown(summary.get("summary", ""))
+                        
+                        # Детали изложения в зависимости от типа контента
+                        with st.expander("🔍 Детали анализа"):
+                            if content_type == "article":
+                                st.write("**Проблема:**", summary.get("problem", ""))
+                                
+                                if summary.get("symptoms"):
+                                    st.write("**Симптомы:**")
+                                    for symptom in summary["symptoms"]:
+                                        st.write(f"- {symptom}")
+                                
+                                if summary.get("solutions"):
+                                    st.write("**Решения:**")
+                                    for i, solution in enumerate(summary["solutions"], 1):
+                                        st.write(f"{i}. {solution.get('description', '')}")
+                                        if solution.get("parameters"):
+                                            st.write(f"   Параметры: {solution['parameters']}")
+                                
+                                if summary.get("printer_models"):
+                                    st.write("**Принтеры:**", ", ".join(summary["printer_models"]))
+                                
+                                if summary.get("materials"):
+                                    st.write("**Материалы:**", ", ".join(summary["materials"]))
+                            
+                            elif content_type == "documentation":
+                                st.write("**Тип документации:**", summary.get("documentation_type", ""))
+                                if summary.get("equipment_models"):
+                                    st.write("**Модели оборудования:**", ", ".join(summary["equipment_models"]))
+                                if summary.get("key_specifications"):
+                                    st.write("**Характеристики:**")
+                                    for k, v in summary["key_specifications"].items():
+                                        st.write(f"- {k}: {v}")
+                            
+                            elif content_type == "comparison":
+                                st.write("**Тип сравнения:**", summary.get("comparison_type", ""))
+                                if summary.get("compared_items"):
+                                    st.write("**Сравниваемые варианты:**", ", ".join(summary["compared_items"]))
+                                if summary.get("key_differences"):
+                                    st.write("**Ключевые отличия:**")
+                                    for item, diffs in summary["key_differences"].items():
+                                        st.write(f"- **{item}**: {', '.join(diffs)}")
+                            
+                            elif content_type == "technical":
+                                st.write("**Тема:**", summary.get("topic", ""))
+                                if summary.get("key_characteristics"):
+                                    st.write("**Характеристики:**")
+                                    for k, v in summary["key_characteristics"].items():
+                                        st.write(f"- {k}: {v}")
+                            
+                            if summary.get("key_points"):
+                                st.write("**Ключевые моменты:**")
+                                for kp in summary["key_points"]:
+                                    st.write(f"- {kp}")
+                        
+                        # Изображения из документа
+                        if parsed_document.get("images"):
+                            st.subheader("🖼️ Изображения из документа")
+                            for i, img in enumerate(parsed_document["images"][:5], 1):  # Показываем первые 5
+                                with st.expander(f"Изображение {i}: {img.get('alt', 'Без описания')}"):
+                                    try:
+                                        st.image(img["url"], use_container_width=True)
+                                    except:
+                                        st.info(f"Не удалось загрузить изображение: {img['url']}")
+                                    if img.get("description"):
+                                        st.caption(img["description"])
+                        
+                        # Рекомендации библиотекаря
+                        recommendations = review.get("recommendations", [])
+                        if recommendations:
+                            st.subheader("💡 Рекомендации библиотекаря")
+                            for rec in recommendations:
+                                st.write(f"- {rec}")
+                        
+                        # Кнопки действий в зависимости от решения администратора
+                        st.markdown("---")
+                        st.subheader("🎯 Действия")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if admin_decision == "approve":
+                                if st.button("✅ Добавить в KB", type="primary", use_container_width=True):
+                                    # Добавление статьи в KB
+                                    try:
+                                        with httpx.Client(timeout=float(os.getenv("API_REQUEST_TIMEOUT", "300"))) as client:
+                                            add_response = client.post(
+                                                f"{API_BASE_URL}/api/kb/articles/add_from_parse",
+                                                json={
+                                                    "parsed_document": parsed_document,
+                                                    "review": review,
+                                                    "admin_decision": admin_decision,
+                                                    "relevance_threshold": st.session_state.relevance_threshold
+                                                },
+                                                timeout=float(os.getenv("API_REQUEST_TIMEOUT", "300"))
+                                            )
+                                            
+                                            if add_response.status_code == 200:
+                                                result = add_response.json()
+                                                st.success(f"✅ Статья успешно добавлена в KB! ID: {result.get('article_id', 'unknown')}")
+                                                # Очистка session state
+                                                if "parsed_document" in st.session_state:
+                                                    del st.session_state.parsed_document
+                                                if "review" in st.session_state:
+                                                    del st.session_state.review
+                                                if "admin_decision" in st.session_state:
+                                                    del st.session_state.admin_decision
+                                                st.rerun()
+                                            else:
+                                                error_detail = add_response.json().get('detail', add_response.text)
+                                                st.error(f"❌ Ошибка добавления: {error_detail}")
+                                    except Exception as e:
+                                        st.error(f"❌ Ошибка подключения к API: {e}")
+                            elif admin_decision == "reject":
+                                st.info("📋 Документ отклонен. Он не будет добавлен в KB.")
+                                if st.button("🔄 Очистить форму", use_container_width=True):
+                                    if "parsed_document" in st.session_state:
+                                        del st.session_state.parsed_document
+                                    if "review" in st.session_state:
+                                        del st.session_state.review
+                                    if "admin_decision" in st.session_state:
+                                        del st.session_state.admin_decision
+                                    st.rerun()
+                            else:  # needs_review
+                                st.warning("⚠️ Требуется дополнительная проверка перед добавлением в KB")
+                                if st.button("💾 Сохранить для проверки", use_container_width=True):
+                                    st.info("💡 Документ сохранен в сессии. Вы можете вернуться к нему позже.")
+                        
+                        with col2:
+                            if st.button("🔄 Сбросить решение", use_container_width=True):
+                                if "parsed_document" in st.session_state:
+                                    del st.session_state.parsed_document
+                                if "review" in st.session_state:
+                                    del st.session_state.review
+                                if "admin_decision" in st.session_state:
+                                    del st.session_state.admin_decision
+                                st.rerun()
+                    else:
+                        error_detail = response.json().get('detail', response.text)
+                        st.error(f"❌ Ошибка парсинга: {error_detail}")
+                        
+            except Exception as e:
+                st.error(f"❌ Ошибка подключения к API: {e}")
+                st.info("💡 Убедитесь, что FastAPI сервер запущен")
+
+elif input_method == "📝 Ручной ввод":
+    # Ручной ввод (существующая форма)
+    with st.form("article_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            url = st.text_input("URL статьи (опционально)", placeholder="https://3dtoday.ru/...")
+            section = st.selectbox(
+                "Раздел",
+                ["Техничка", "3D-печать", "Оборудование", "Материалы", "Применение", "Другое"]
+            )
+        
+        with col2:
+            st.info("💡 Заполните обязательные поля: заголовок и содержимое")
+        
+        title = st.text_input("Заголовок статьи *", placeholder="Как устранить stringing на Ender-3")
+        
+        content = st.text_area(
+            "Содержимое статьи *",
+            height=300,
+            placeholder="Вставьте полный текст статьи..."
+        )
+        
+        submitted = st.form_submit_button("🔍 Проверить и добавить в KB", use_container_width=True)
+    
+    # Обработка формы ручного ввода
+    if submitted:
+        if not title or not content:
+            st.error("❌ Заполните обязательные поля: заголовок и содержимое")
+        else:
+            # Шаг 1: Валидация
+            with st.spinner("🔍 Проверка релевантности статьи..."):
+                try:
+                    with httpx.Client(timeout=60.0) as client:
+                        response = client.post(
+                            f"{API_BASE_URL}/api/kb/articles/validate",
+                            json={
+                                "title": title,
+                                "content": content,
+                                "url": url if url else None,
+                                "section": section
+                            }
+                        )
+                        
+                        if response.status_code == 200:
+                            validation = response.json()
+                        else:
+                            st.error(f"❌ Ошибка валидации: {response.text}")
+                            st.stop()
+                except Exception as e:
+                    st.error(f"❌ Ошибка подключения к API: {e}")
+                    st.info("💡 Убедитесь, что FastAPI сервер запущен: `uvicorn backend.app.main:app --reload`")
+                    st.stop()
+            
+            # Отображение результатов валидации
+            st.subheader("📊 Результаты валидации")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                relevance_score = validation.get('relevance_score', 0)
+                st.metric(
+                    "Релевантность",
+                    f"{relevance_score:.2f}",
+                    delta=f"{relevance_score - 0.7:.2f}" if relevance_score >= 0.7 else None,
+                    delta_color="normal" if relevance_score >= 0.7 else "inverse"
+                )
+            
+            with col2:
+                quality_score = validation.get('quality_score', 0)
+                st.metric(
+                    "Качество",
+                    f"{quality_score:.2f}",
+                    delta=f"{quality_score - 0.6:.2f}" if quality_score >= 0.6 else None,
+                    delta_color="normal" if quality_score >= 0.6 else "inverse"
+                )
+            
+            with col3:
+                has_solutions = validation.get('has_solutions', False)
+                st.metric(
+                    "Есть решения",
+                    "✅ Да" if has_solutions else "❌ Нет"
+                )
+            
+            # Статус релевантности
+            is_relevant = validation.get('is_relevant', False)
+            if is_relevant:
+                st.success("✅ Статья релевантна и может быть добавлена в KB")
+            else:
+                st.warning("⚠️ Статья не релевантна. Проверьте критерии ниже.")
+            
+            # Проблемы и рекомендации
+            if validation.get('issues'):
+                with st.expander("⚠️ Обнаруженные проблемы"):
+                    for issue in validation['issues']:
+                        st.write(f"- {issue}")
+            
+            if validation.get('recommendations'):
+                with st.expander("💡 Рекомендации"):
+                    for rec in validation['recommendations']:
+                        st.write(f"- {rec}")
+            
+            # Извлеченные метаданные
+            metadata = validation.get('metadata')
+            if metadata:
+                st.subheader("📝 Извлеченные метаданные")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Тип проблемы:**", metadata.get('problem_type') or "не определен")
+                    st.write("**Принтеры:**", ', '.join(metadata.get('printer_models', [])) or "не указаны")
+                    st.write("**Материалы:**", ', '.join(metadata.get('materials', [])) or "не указаны")
+                
+                with col2:
+                    st.write("**Симптомы:**", ', '.join(metadata.get('symptoms', [])) or "не указаны")
+                    st.write("**Количество решений:**", len(metadata.get('solutions', [])))
+                
+                # Отображение решений
+                if metadata.get('solutions'):
+                    with st.expander("🔧 Извлеченные решения"):
+                        for i, solution in enumerate(metadata['solutions'], 1):
+                            st.write(f"**Решение {i}:**")
+                            st.write(f"- Параметр: {solution.get('parameter', 'N/A')}")
+                            st.write(f"- Значение: {solution.get('value', 'N/A')} {solution.get('unit', '')}")
+                            st.write(f"- Описание: {solution.get('description', 'N/A')}")
+                            st.write("---")
+            
+            # Подтверждение и добавление
+            if is_relevant:
+                st.markdown("---")
+                
+                if st.button("💾 Добавить статью в KB", type="primary", use_container_width=True):
+                    with st.spinner("💾 Индексация статьи..."):
+                        try:
+                            with httpx.Client(timeout=120.0) as client:
+                                response = client.post(
+                                    f"{API_BASE_URL}/api/kb/articles/add",
+                                    json={
+                                        "title": title,
+                                        "content": content,
+                                        "url": url if url else None,
+                                        "section": section
+                                    }
+                                )
+                                
+                                if response.status_code == 200:
+                                    result = response.json()
+                                    st.success(f"✅ Статья успешно добавлена в KB!")
+                                    st.info(f"**ID статьи:** `{result.get('article_id')}`")
+                                    
+                                    # Очистка формы через rerun
+                                    st.rerun()
+                                else:
+                                    error_detail = response.json().get('detail', response.text)
+                                    st.error(f"❌ Ошибка: {error_detail}")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка подключения к API: {e}")
+
+else:  # Импорт из JSON
+    st.info("📄 Импорт из JSON будет доступен в следующей версии")
+    json_input = st.text_area(
+        "Вставьте JSON статьи",
+        height=200,
+        placeholder='{"title": "...", "content": "...", ...}'
+    )
+    
+    if st.button("📥 Импортировать из JSON"):
+        st.info("Функция импорта из JSON будет реализована позже")
+
+# Обработка добавления распарсенного документа
+if st.session_state.get("use_parsed_document") and st.session_state.get("parsed_document"):
+    parsed_document = st.session_state.parsed_document
+    review = st.session_state.get("review", {})
+    summary = st.session_state.get("summary", {})
+    
+    # Используем отфильтрованный контент если есть
+    filtered_content = review.get("filtered_content")
+    if filtered_content:
+        parsed_document["content"] = filtered_content
+    
+    # Валидация распарсенной статьи
+    with st.spinner("🔍 Валидация распарсенной статьи..."):
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(
+                    f"{API_BASE_URL}/api/kb/articles/validate",
+                    json={
+                        "title": parsed_document.get("title", ""),
+                        "content": parsed_document.get("content", ""),
+                        "url": parsed_document.get("url") or st.session_state.get("document_source"),
+                        "section": parsed_document.get("section", "unknown")
+                    }
+                )
+                
+                if response.status_code == 200:
+                    validation = response.json()
+                    
+                    # Отображение валидации
+                    st.subheader("📊 Результаты валидации")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        relevance_score = validation.get('relevance_score', 0)
+                        st.metric("Релевантность", f"{relevance_score:.2f}")
+                    
+                    with col2:
+                        quality_score = validation.get('quality_score', 0)
+                        st.metric("Качество", f"{quality_score:.2f}")
+                    
+                    with col3:
+                        has_solutions = validation.get('has_solutions', False)
+                        st.metric("Есть решения", "✅ Да" if has_solutions else "❌ Нет")
+                    
+                    # Если релевантна - предложить добавить
+                    if validation.get('is_relevant'):
+                        if st.button("💾 Добавить статью в KB", type="primary", use_container_width=True):
+                            with st.spinner("💾 Индексация статьи..."):
+                                try:
+                                    with httpx.Client(timeout=120.0) as client:
+                                        response = client.post(
+                                            f"{API_BASE_URL}/api/kb/articles/add",
+                                            json={
+                                                "title": parsed_document.get("title", ""),
+                                                "content": parsed_document.get("content", ""),
+                                                "url": parsed_document.get("url") or st.session_state.get("document_source"),
+                                                "section": parsed_document.get("section", "unknown")
+                                            }
+                                        )
+                                        
+                                        if response.status_code == 200:
+                                            result = response.json()
+                                            st.success(f"✅ Статья успешно добавлена в KB!")
+                                            st.info(f"**ID статьи:** `{result.get('article_id')}`")
+                                            
+                                            # Очистка session state
+                                            del st.session_state.use_parsed_document
+                                            del st.session_state.parsed_document
+                                            del st.session_state.summary
+                                            del st.session_state.document_source
+                                            
+                                            st.rerun()
+                                        else:
+                                            error_detail = response.json().get('detail', response.text)
+                                            st.error(f"❌ Ошибка: {error_detail}")
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка: {e}")
+                    else:
+                        st.warning("⚠️ Статья не релевантна и не может быть добавлена")
+                        
+        except Exception as e:
+            st.error(f"❌ Ошибка валидации: {e}")
+
+# Инструкция
+with st.expander("📖 Инструкция по использованию"):
+    st.markdown("""
+    ### Процесс добавления статьи:
+    
+    1. **Введите данные статьи**
+       - URL (опционально)
+       - Заголовок (обязательно)
+       - Содержимое (обязательно)
+       - Раздел
+    
+    2. **Проверка релевантности**
+       - Система автоматически проверит релевантность через LLM
+       - Оценка релевантности (0.0-1.0)
+       - Оценка качества (0.0-1.0)
+       - Проверка наличия решений
+    
+    3. **Извлечение метаданных**
+       - Тип проблемы
+       - Модели принтеров
+       - Материалы
+       - Симптомы
+       - Решения с параметрами
+    
+    4. **Индексация**
+       - Статья добавляется в Qdrant через API
+       - Генерируются эмбеддинги
+       - Статья доступна для поиска
+    
+    ### Критерии качества:
+    
+    ✅ **Хорошая статья:**
+    - Содержит конкретные решения
+    - Упоминает модели принтеров/материалы
+    - Имеет четкую структуру
+    - Актуальная информация
+    
+    ❌ **Плохая статья:**
+    - Общие рассуждения
+    - Нет конкретных решений
+    - Устаревшая информация
+    """)
+

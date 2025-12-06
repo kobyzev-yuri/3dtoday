@@ -308,8 +308,8 @@ class VectorDBService:
             
             return {
                 "articles_count": collection_info.points_count,
-                "vectors_count": collection_info.vectors_count,
-                "indexed_vectors_count": collection_info.indexed_vectors_count
+                "vectors_count": collection_info.points_count,  # Используем points_count как количество векторов
+                "indexed_vectors_count": collection_info.points_count  # Для простоты используем points_count
             }
             
         except Exception as e:

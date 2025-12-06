@@ -38,6 +38,7 @@ wheels/
 # Logs
 logs/
 *.log
+*.log
 
 # Data
 data/knowledge_base/
@@ -61,4 +62,6 @@ temp/
 # OS
 .DS_Store
 Thumbs.db
+
+
 

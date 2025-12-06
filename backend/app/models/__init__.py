@@ -1,4 +1,1 @@
-"""
-Pydantic models for API requests and responses
-"""
-
+# Модели для API
