@@ -255,7 +255,14 @@ async def parse_document(
             logger.error(f"❌ Не удалось распарсить документ: {source[:100]}")
             raise HTTPException(status_code=404, detail="Не удалось распарсить документ")
         
-        logger.info(f"✅ Документ распарсен: title={doc_data.get('title', 'N/A')[:50]}, content_length={len(doc_data.get('content', ''))}")
+        logger.info(f"✅ Документ распарсен: title={doc_data.get('title', 'N/A')[:50]}, content_length={len(doc_data.get('content', ''))}, images_count={len(doc_data.get('images', []))}")
+        
+        # Фильтрация изображений по релевантности для мультимодальной KB
+        images = doc_data.get("images", [])
+        if images:
+            logger.info(f"📷 Найдено {len(images)} изображений в документе")
+            # Агент-библиотекарь проверит релевантность изображений при анализе
+            # Пока передаем все изображения, фильтрация будет выполнена в review_and_decide
         
         # Полный цикл: анализ + решение о публикации через агента-библиотекаря
         # Передаем провайдер и модель в агента для правильной инициализации
@@ -267,12 +274,16 @@ async def parse_document(
             review_result = await librarian.review_and_decide(
                 title=doc_data["title"],
                 content=doc_data["content"],
-                images=doc_data.get("images", []),
+                images=images,  # Передаем изображения для анализа релевантности
                 url=doc_data.get("url"),
                 content_type=doc_data.get("content_type"),
                 is_questions_list=doc_data.get("is_questions_list", False)
             )
             logger.info(f"✅ Анализ завершен: relevance_score={review_result.get('relevance_score', 'N/A')}")
+            
+            # Если документ релевантен, помечаем изображения как релевантные
+            if review_result.get("is_relevant", False) and images:
+                logger.info(f"✅ Документ релевантен, изображения будут проиндексированы в мультимодальную KB")
         except Exception as e:
             logger.error(f"❌ Ошибка при анализе через агента-библиотекаря: {e}", exc_info=True)
             raise

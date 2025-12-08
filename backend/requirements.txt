@@ -43,6 +43,7 @@ httpx>=0.25.0
 
 # PDF parsing
 PyPDF2>=3.0.0
+PyMuPDF>=1.23.0  # Для надежного извлечения изображений из PDF
 
 # OpenCLIP для мультимодальных эмбеддингов (из sam2seg)
 open-clip-torch>=2.24.0

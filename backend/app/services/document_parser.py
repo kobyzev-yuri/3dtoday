@@ -203,6 +203,64 @@ class DocumentParser:
             import base64
             import tempfile
             import os
+            import hashlib
+            
+            # Пробуем использовать PyMuPDF для более надежного извлечения изображений
+            use_pymupdf = False
+            try:
+                import fitz  # PyMuPDF
+                use_pymupdf = True
+                logger.info("📦 Используется PyMuPDF для извлечения изображений из PDF")
+            except ImportError:
+                logger.info("ℹ️ PyMuPDF не установлен, используется PyPDF2 (может быть менее надежным)")
+            
+            # Если используем PyMuPDF, открываем PDF через него для извлечения изображений
+            pdf_images_pymupdf = []
+            if use_pymupdf:
+                try:
+                    pdf_doc_fitz = fitz.open(source if not source.startswith('http') else None, stream=pdf_content if source.startswith('http') else None, filetype="pdf")
+                    for page_num_fitz in range(min(pages_to_parse, len(pdf_doc_fitz))):
+                        page_fitz = pdf_doc_fitz[page_num_fitz]
+                        image_list = page_fitz.get_images()
+                        for img_index, img in enumerate(image_list):
+                            try:
+                                xref = img[0]
+                                base_image = pdf_doc_fitz.extract_image(xref)
+                                image_bytes = base_image["image"]
+                                image_ext = base_image["ext"]
+                                
+                                # Сохраняем изображение во временный файл
+                                image_hash = hashlib.md5(image_bytes).hexdigest()[:8]
+                                temp_dir = Path(tempfile.gettempdir()) / "pdf_images"
+                                temp_dir.mkdir(exist_ok=True)
+                                temp_image_path = temp_dir / f"pdf_page_{page_num_fitz + 1}_img_{img_index + 1}_{image_hash}.{image_ext}"
+                                
+                                with open(temp_image_path, 'wb') as img_file:
+                                    img_file.write(image_bytes)
+                                
+                                # Создаем base64 для передачи через API
+                                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                                
+                                pdf_images_pymupdf.append({
+                                    "url": str(temp_image_path),
+                                    "alt": f"Изображение со страницы {page_num_fitz + 1}",
+                                    "title": f"Image {img_index + 1}",
+                                    "description": f"Изображение {img_index + 1} со страницы {page_num_fitz + 1} PDF документа",
+                                    "data": image_base64,
+                                    "mime_type": f"image/{image_ext}",
+                                    "page": page_num_fitz + 1,
+                                    "image_index": img_index + 1,
+                                    "size_bytes": len(image_bytes),
+                                    "temp_path": str(temp_image_path)  # Путь для дальнейшей обработки
+                                })
+                                
+                                logger.info(f"📷 Извлечено изображение через PyMuPDF: страница {page_num_fitz + 1}, изображение {img_index + 1}, размер {len(image_bytes)} байт, формат {image_ext}")
+                            except Exception as img_error:
+                                logger.warning(f"⚠️ Ошибка при извлечении изображения {img_index + 1} со страницы {page_num_fitz + 1} через PyMuPDF: {img_error}")
+                    pdf_doc_fitz.close()
+                except Exception as pymupdf_error:
+                    logger.warning(f"⚠️ Ошибка при использовании PyMuPDF: {pymupdf_error}, используем PyPDF2")
+                    use_pymupdf = False
             
             for page_num in range(pages_to_parse):
                 page = pdf_reader.pages[page_num]
@@ -275,10 +333,27 @@ class DocumentParser:
             if pages_to_parse < total_pages:
                 content += f"\n\n[Примечание: документ содержит {total_pages} страниц, обработано {pages_to_parse}]"
             
-            if images:
-                logger.info(f"✅ Извлечено изображений из PDF: {len(images)}")
+            # Используем изображения из PyMuPDF, если они были извлечены
+            if pdf_images_pymupdf:
+                images = pdf_images_pymupdf
+                logger.info(f"✅ Извлечено изображений из PDF через PyMuPDF: {len(images)}")
+            elif images:
+                logger.info(f"✅ Извлечено изображений из PDF через PyPDF2: {len(images)}")
             else:
                 logger.info("ℹ️ Изображения в PDF не найдены")
+            
+            # Фильтрация изображений по релевантности (если есть контекст документа)
+            if images and content:
+                # Простая эвристика: если документ релевантен 3D-печати, изображения тоже релевантны
+                # Более точная проверка будет выполнена агентом-библиотекарем
+                relevant_keywords = ['3d', 'принтер', 'печать', 'filament', 'pla', 'petg', 'abs', 'printer', 'extruder', 'bed', 'nozzle', 'layer', 'stringing', 'warping']
+                content_lower = content.lower()
+                is_3d_printing_related = any(keyword in content_lower for keyword in relevant_keywords)
+                
+                if is_3d_printing_related:
+                    logger.info(f"✅ Документ релевантен 3D-печати, все {len(images)} изображений считаются релевантными")
+                else:
+                    logger.info(f"⚠️ Документ может быть не релевантен 3D-печати, требуется дополнительная проверка изображений")
             
             # Извлечение метаданных (безопасная обработка IndirectObject)
             metadata = {}
