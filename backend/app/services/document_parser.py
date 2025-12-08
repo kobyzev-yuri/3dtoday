@@ -212,37 +212,63 @@ class DocumentParser:
                 
                 # Извлечение изображений со страницы
                 try:
-                    if hasattr(page, 'images') and page.images:
-                        for img_num, image_file_object in enumerate(page.images):
+                    # Пробуем извлечь изображения через page.images
+                    # Примечание: PyPDF2 может иметь проблемы с некоторыми типами изображений
+                    if hasattr(page, 'images'):
+                        try:
+                            page_images = page.images
+                            if page_images:
+                                for img_num, image_file_object in enumerate(page_images):
+                                    try:
+                                        # Получаем данные изображения
+                                        image_data = image_file_object.data
+                                        
+                                        if not image_data or len(image_data) == 0:
+                                            continue
+                                        
+                                        # Определяем расширение файла
+                                        ext = 'jpg'  # По умолчанию
+                                        if hasattr(image_file_object, 'name') and image_file_object.name:
+                                            name_ext = image_file_object.name.split('.')[-1].lower()
+                                            if name_ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp']:
+                                                ext = name_ext
+                                        
+                                        # Создаем base64 представление для передачи через API
+                                        image_base64 = base64.b64encode(image_data).decode('utf-8')
+                                        
+                                        images.append({
+                                            "url": f"pdf_image_page_{page_num + 1}_img_{img_num + 1}.{ext}",
+                                            "alt": f"Изображение со страницы {page_num + 1}",
+                                            "title": image_file_object.name if hasattr(image_file_object, 'name') and image_file_object.name else f"Image {img_num + 1}",
+                                            "description": f"Изображение {img_num + 1} со страницы {page_num + 1} PDF документа",
+                                            "data": image_base64,  # Base64 данные изображения
+                                            "mime_type": f"image/{ext}",
+                                            "page": page_num + 1,
+                                            "image_index": img_num + 1,
+                                            "size_bytes": len(image_data)
+                                        })
+                                        
+                                        logger.debug(f"📷 Извлечено изображение: страница {page_num + 1}, изображение {img_num + 1}, размер {len(image_data)} байт")
+                                    except Exception as img_error:
+                                        logger.warning(f"⚠️ Ошибка при извлечении изображения {img_num + 1} со страницы {page_num + 1}: {img_error}")
+                        except Exception as images_error:
+                            # PyPDF2 может иметь проблемы с некоторыми типами изображений (например, PA mode)
+                            logger.debug(f"⚠️ Не удалось получить список изображений со страницы {page_num + 1}: {images_error}")
+                            # Пробуем альтернативный метод через /XObject
                             try:
-                                # Получаем данные изображения
-                                image_data = image_file_object.data
-                                
-                                # Определяем расширение файла
-                                ext = image_file_object.name.split('.')[-1] if '.' in image_file_object.name else 'jpg'
-                                if ext not in ['jpg', 'jpeg', 'png', 'gif']:
-                                    ext = 'jpg'  # По умолчанию jpg
-                                
-                                # Создаем base64 представление для передачи через API
-                                image_base64 = base64.b64encode(image_data).decode('utf-8')
-                                image_data_url = f"data:image/{ext};base64,{image_base64[:100]}..."  # Обрезаем для логов
-                                
-                                images.append({
-                                    "url": f"pdf_image_page_{page_num + 1}_img_{img_num + 1}.{ext}",
-                                    "alt": f"Изображение со страницы {page_num + 1}",
-                                    "title": image_file_object.name if hasattr(image_file_object, 'name') else f"Image {img_num + 1}",
-                                    "description": f"Изображение {img_num + 1} со страницы {page_num + 1} PDF документа",
-                                    "data": image_base64,  # Base64 данные изображения
-                                    "mime_type": f"image/{ext}",
-                                    "page": page_num + 1,
-                                    "image_index": img_num + 1
-                                })
-                                
-                                logger.debug(f"📷 Извлечено изображение: страница {page_num + 1}, изображение {img_num + 1}, размер {len(image_data)} байт")
-                            except Exception as img_error:
-                                logger.warning(f"⚠️ Ошибка при извлечении изображения со страницы {page_num + 1}: {img_error}")
+                                if '/XObject' in page.get('/Resources', {}):
+                                    xobjects = page['/Resources']['/XObject'].get_object()
+                                    img_count = 0
+                                    for obj_name in xobjects:
+                                        obj = xobjects[obj_name]
+                                        if obj.get('/Subtype') == '/Image':
+                                            img_count += 1
+                                    if img_count > 0:
+                                        logger.info(f"ℹ️ На странице {page_num + 1} найдено {img_count} изображений, но PyPDF2 не может их извлечь (известная проблема с некоторыми форматами)")
+                            except Exception:
+                                pass
                 except Exception as e:
-                    logger.debug(f"⚠️ Страница {page_num + 1} не содержит изображений или ошибка доступа: {e}")
+                    logger.debug(f"⚠️ Ошибка при проверке изображений на странице {page_num + 1}: {e}")
             
             content = "\n\n".join(content_parts)
             
