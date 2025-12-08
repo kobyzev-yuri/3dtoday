@@ -405,8 +405,33 @@ class VisionAnalyzer:
             Dict с результатами анализа
         """
         try:
+            # Оптимизируем изображение для llava (она медленная на больших изображениях)
+            try:
+                image = Image.open(io.BytesIO(image_data))
+                file_size = len(image_data)
+                
+                # Для llava используем меньший размер (она медленная)
+                # Максимум 768px для ускорения обработки
+                max_size = 768 if file_size > 2 * 1024 * 1024 else 512
+                image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                
+                # Конвертируем в RGB если нужно
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+                
+                # Сохраняем в буфер с хорошим качеством но меньшим размером
+                img_buffer = io.BytesIO()
+                quality = 85  # Хорошее качество но не максимальное для скорости
+                image.save(img_buffer, format='JPEG', quality=quality)
+                optimized_image_data = img_buffer.getvalue()
+                
+                logger.info(f"📷 Изображение оптимизировано для llava: {file_size/1024:.1f}KB -> {len(optimized_image_data)/1024:.1f}KB")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось оптимизировать изображение, используем оригинал: {e}")
+                optimized_image_data = image_data
+            
             # Кодируем изображение в base64 для Ollama API
-            image_base64 = base64.b64encode(image_data).decode()
+            image_base64 = base64.b64encode(optimized_image_data).decode()
             
             # Промпт для анализа изображений из PDF документов о 3D-печати
             prompt = f"""Проанализируй это изображение из документа '{image_name}' детально.
@@ -432,10 +457,16 @@ class VisionAnalyzer:
                 }
             }
             
+            # Используем увеличенный таймаут для llava (она может быть медленной)
+            # Добавляем небольшой запас сверх настроенного таймаута
+            request_timeout = self.ollama_timeout + 60  # +60 секунд запаса
+            
+            logger.info(f"📤 Отправка изображения в llava (timeout={request_timeout}s, размер={len(optimized_image_data)/1024:.1f}KB)")
+            
             response = httpx.post(
                 f"{self.ollama_base_url}/api/generate",
                 json=payload,
-                timeout=self.ollama_timeout
+                timeout=request_timeout
             )
             
             if response.status_code == 200:
