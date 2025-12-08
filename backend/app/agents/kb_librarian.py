@@ -887,10 +887,116 @@ Abstract:"""
         return None
     
     async def _analyze_images(self, images: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Анализ изображений из статьи"""
+        """
+        Анализ изображений из статьи через Gemini Vision API
+        Адаптировано из ai_billing проекта
+        """
         if not images:
             return None
         
+        try:
+            # Импортируем VisionAnalyzer
+            from app.services.vision_analyzer import VisionAnalyzer
+            vision_analyzer = VisionAnalyzer()
+            
+            # Проверяем доступность Gemini Vision API
+            availability = vision_analyzer.check_availability()
+            if not availability.get('available', False):
+                logger.warning(f"⚠️ Gemini Vision API недоступен: {availability.get('message', 'Unknown')}")
+                # Fallback на анализ описаний
+                return await self._analyze_images_fallback(images)
+            
+            # Анализируем каждое изображение через Gemini Vision API
+            image_analyses = []
+            relevant_images = []
+            
+            for img_idx, img in enumerate(images[:10]):  # Ограничиваем до 10 изображений
+                try:
+                    # Пытаемся получить base64 данные изображения
+                    image_data = img.get("data")
+                    image_path = img.get("url")
+                    image_name = img.get("title") or img.get("alt") or f"image_{img_idx + 1}"
+                    
+                    analysis_result = None
+                    
+                    # Если есть base64 данные, анализируем их
+                    if image_data:
+                        try:
+                            analysis_result = vision_analyzer.analyze_image_from_base64(image_data, image_name)
+                        except Exception as e:
+                            logger.warning(f"⚠️ Ошибка анализа base64 изображения {image_name}: {e}")
+                    
+                    # Если есть путь к файлу, анализируем его
+                    elif image_path and Path(image_path).exists():
+                        try:
+                            analysis_result = vision_analyzer.analyze_image_from_path(Path(image_path))
+                        except Exception as e:
+                            logger.warning(f"⚠️ Ошибка анализа файла {image_path}: {e}")
+                    
+                    # Если анализ успешен, проверяем релевантность
+                    if analysis_result and analysis_result.get('success'):
+                        analysis_text = analysis_result.get('analysis', '')
+                        
+                        # Проверяем релевантность к 3D-печати
+                        relevance_result = vision_analyzer.check_relevance_to_3d_printing(analysis_text, image_name)
+                        
+                        if relevance_result.get('success') and relevance_result.get('is_relevant', False):
+                            relevant_images.append({
+                                'image_name': image_name,
+                                'analysis': analysis_text,
+                                'relevance_score': relevance_result.get('relevance_score', 0.5),
+                                'problem_type': relevance_result.get('problem_type'),
+                                'printer_models': relevance_result.get('printer_models', []),
+                                'materials': relevance_result.get('materials', [])
+                            })
+                            logger.info(f"✅ Изображение {image_name} релевантно 3D-печати (score={relevance_result.get('relevance_score', 0.5):.2f})")
+                        else:
+                            logger.info(f"ℹ️ Изображение {image_name} не релевантно 3D-печати")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка обработки изображения {img_idx + 1}: {e}")
+                    continue
+            
+            # Формируем результат анализа
+            if relevant_images:
+                # Объединяем информацию из всех релевантных изображений
+                all_problems = []
+                all_solutions = []
+                all_printer_models = set()
+                all_materials = set()
+                
+                for img_data in relevant_images:
+                    if img_data.get('problem_type'):
+                        all_problems.append(img_data['problem_type'])
+                    if img_data.get('printer_models'):
+                        all_printer_models.update(img_data['printer_models'])
+                    if img_data.get('materials'):
+                        all_materials.update(img_data['materials'])
+                
+                return {
+                    "problems_shown": list(set(all_problems)),
+                    "solutions_shown": all_solutions,  # Можно расширить логикой определения решений
+                    "visual_indicators": [img['image_name'] for img in relevant_images],
+                    "relevant_images_count": len(relevant_images),
+                    "total_images_analyzed": len(images),
+                    "printer_models": list(all_printer_models),
+                    "materials": list(all_materials),
+                    "image_analyses": relevant_images
+                }
+            else:
+                logger.info("ℹ️ Релевантные изображения не найдены")
+                return None
+                
+        except ImportError as e:
+            logger.warning(f"⚠️ VisionAnalyzer недоступен: {e}, используем fallback")
+            return await self._analyze_images_fallback(images)
+        except Exception as e:
+            logger.error(f"❌ Ошибка анализа изображений через Gemini Vision: {e}")
+            # Fallback на анализ описаний
+            return await self._analyze_images_fallback(images)
+    
+    async def _analyze_images_fallback(self, images: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Fallback метод: анализ изображений по описаниям (старый метод)"""
         image_descriptions = [img.get("description", "") or img.get("alt", "") for img in images]
         image_descriptions = [desc for desc in image_descriptions if desc]
         
@@ -921,7 +1027,7 @@ Abstract:"""
             
             return self._extract_json(response)
         except Exception as e:
-            logger.error(f"Ошибка анализа изображений: {e}")
+            logger.error(f"Ошибка анализа изображений (fallback): {e}")
         
         return None
     
