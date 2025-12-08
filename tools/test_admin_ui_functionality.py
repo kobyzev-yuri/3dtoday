@@ -269,7 +269,7 @@ def test_pdf_upload(pdf_path: Optional[str] = None) -> Dict[str, Any]:
                         "source_type": "pdf",
                         "llm_provider": "gemini",  # Используем Gemini для теста
                         "timeout": 300,
-                        "max_pages": 3  # Ограничиваем до 3 страниц для теста
+                        "max_pages": 30  # Ограничиваем до 30 страниц для теста
                     }
                 )
             

@@ -215,9 +215,9 @@ async def parse_document(
         if not source:
             raise HTTPException(status_code=400, detail="source обязателен")
         
-        # Для Gemini по умолчанию ограничиваем PDF до 3 страниц
+        # Для Gemini по умолчанию ограничиваем PDF до 30 страниц
         if max_pages is None and llm_provider == "gemini" and (source_type == "pdf" or (source_type is None and source.lower().endswith('.pdf'))):
-            max_pages = 3
+            max_pages = 30
             logger.info(f"📄 Ограничение PDF до {max_pages} страниц для Gemini")
         
         # Временное изменение провайдера и модели если указаны
