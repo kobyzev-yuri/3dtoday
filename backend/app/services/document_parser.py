@@ -43,13 +43,14 @@ class DocumentParser:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
     
-    async def parse_document(self, source: str, source_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def parse_document(self, source: str, source_type: Optional[str] = None, max_pages: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Парсинг документа из источника
         
         Args:
             source: URL или путь к файлу, или JSON строка
             source_type: Тип источника (auto, html, pdf, json, url)
+            max_pages: Максимальное количество страниц для PDF (None = все страницы)
         
         Returns:
             Словарь с данными документа или None при ошибке
@@ -65,7 +66,7 @@ class DocumentParser:
             if source_type == "json":
                 return await self._parse_json(source)
             elif source_type == "pdf":
-                return await self._parse_pdf(source)
+                return await self._parse_pdf(source, max_pages=max_pages)
             elif source_type == "html" or source_type == "url":
                 return await self._parse_html(source)
             else:
@@ -151,8 +152,14 @@ class DocumentParser:
             logger.error(f"❌ Ошибка обработки JSON: {e}")
             return None
     
-    async def _parse_pdf(self, source: str) -> Optional[Dict[str, Any]]:
-        """Парсинг PDF документа"""
+    async def _parse_pdf(self, source: str, max_pages: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """
+        Парсинг PDF документа
+        
+        Args:
+            source: URL или путь к PDF файлу
+            max_pages: Максимальное количество страниц для парсинга (None = все страницы)
+        """
         try:
             # Проверка наличия библиотеки для PDF
             try:
@@ -181,14 +188,27 @@ class DocumentParser:
             pdf_file = io.BytesIO(pdf_content)
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             
+            total_pages = len(pdf_reader.pages)
+            
+            # Ограничение количества страниц
+            pages_to_parse = total_pages
+            if max_pages is not None and max_pages > 0:
+                pages_to_parse = min(max_pages, total_pages)
+                if pages_to_parse < total_pages:
+                    logger.info(f"📄 Ограничение парсинга PDF: {pages_to_parse} из {total_pages} страниц")
+            
             # Извлечение текста
             content_parts = []
-            for page_num, page in enumerate(pdf_reader.pages):
+            for page_num in range(pages_to_parse):
+                page = pdf_reader.pages[page_num]
                 text = page.extract_text()
                 if text:
                     content_parts.append(text)
             
             content = "\n\n".join(content_parts)
+            
+            if pages_to_parse < total_pages:
+                content += f"\n\n[Примечание: документ содержит {total_pages} страниц, обработано {pages_to_parse}]"
             
             # Извлечение метаданных
             metadata = pdf_reader.metadata or {}
@@ -204,12 +224,13 @@ class DocumentParser:
                 "images": [],  # PDF изображения требуют отдельной обработки
                 "content_type": "documentation",  # PDF обычно документация
                 "metadata": {
-                    "pages": len(pdf_reader.pages),
+                    "pages": total_pages,
+                    "pages_parsed": pages_to_parse,
                     "pdf_metadata": dict(metadata)
                 }
             }
             
-            logger.info(f"✅ PDF документ распарсен: {article_data['title']} ({len(pdf_reader.pages)} страниц)")
+            logger.info(f"✅ PDF документ распарсен: {article_data['title']} ({pages_to_parse} из {total_pages} страниц)")
             return article_data
             
         except Exception as e:

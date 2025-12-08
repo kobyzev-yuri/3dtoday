@@ -267,15 +267,35 @@ def test_pdf_upload(pdf_path: Optional[str] = None) -> Dict[str, Any]:
                     json={
                         "source": str(Path(pdf_path).absolute()),
                         "source_type": "pdf",
-                        "llm_provider": "ollama",
-                        "timeout": 300
+                        "llm_provider": "gemini",  # Используем Gemini для теста
+                        "timeout": 300,
+                        "max_pages": 3  # Ограничиваем до 3 страниц для теста
                     }
                 )
             
             if response.status_code != 200:
                 print_error(f"Ошибка парсинга PDF: {response.status_code}")
-                print_error(f"Ответ: {response.text}")
-                return {"success": False, "error": f"HTTP {response.status_code}"}
+                
+                # Пытаемся получить детали ошибки из ответа
+                try:
+                    error_detail = response.json().get('detail', response.text)
+                except:
+                    error_detail = response.text[:500] if len(response.text) > 500 else response.text
+                
+                print_error(f"Детали ошибки: {error_detail}")
+                
+                # Проверяем типичные причины ошибок
+                error_lower = error_detail.lower() if isinstance(error_detail, str) else ""
+                if "не удалось распарсить" in error_lower or "parse" in error_lower:
+                    print_info("💡 Возможно, PDF файл поврежден или имеет нестандартный формат")
+                elif "не найден" in error_lower or "not found" in error_lower or "no such file" in error_lower:
+                    print_info("💡 Файл не найден - проверьте путь к файлу")
+                elif "pypdf2" in error_lower or "import" in error_lower:
+                    print_info("💡 Возможно, библиотека PyPDF2 не установлена: pip install PyPDF2")
+                elif "permission" in error_lower or "доступ" in error_lower:
+                    print_info("💡 Проблема с правами доступа к файлу")
+                
+                return {"success": False, "error": f"HTTP {response.status_code}: {error_detail[:200]}"}
             
             result = response.json()
             

@@ -176,7 +176,8 @@ async def parse_document(
     source_type: Optional[str] = Body(None),
     llm_provider: Optional[str] = Body(None),
     model: Optional[str] = Body(None),
-    timeout: Optional[int] = Body(None)
+    timeout: Optional[int] = Body(None),
+    max_pages: Optional[int] = Body(None)
 ):
     """
     Парсинг документа из разных источников и анализ через агента-библиотекаря
@@ -186,7 +187,8 @@ async def parse_document(
         "source_type": "auto|html|pdf|json|url" (опционально),
         "llm_provider": "openai|ollama|gemini" (опционально),
         "model": "название модели" (опционально),
-        "timeout": 180 (опционально, секунды)
+        "timeout": 180 (опционально, секунды),
+        "max_pages": 3 (опционально, максимальное количество страниц для PDF, по умолчанию 3 для Gemini)
     }
     
     Поддерживает:
@@ -208,9 +210,15 @@ async def parse_document(
             llm_provider = llm_provider or request.get("llm_provider")
             model = model or request.get("model")
             timeout = timeout or request.get("timeout")
+            max_pages = max_pages or request.get("max_pages")
         
         if not source:
             raise HTTPException(status_code=400, detail="source обязателен")
+        
+        # Для Gemini по умолчанию ограничиваем PDF до 3 страниц
+        if max_pages is None and llm_provider == "gemini" and (source_type == "pdf" or (source_type is None and source.lower().endswith('.pdf'))):
+            max_pages = 3
+            logger.info(f"📄 Ограничение PDF до {max_pages} страниц для Gemini")
         
         # Временное изменение провайдера и модели если указаны
         original_provider = None
@@ -239,7 +247,7 @@ async def parse_document(
         from agents.kb_librarian import KBLibrarianAgent
         
         parser = DocumentParser()
-        doc_data = await parser.parse_document(source, source_type)
+        doc_data = await parser.parse_document(source, source_type, max_pages=max_pages)
         
         if not doc_data:
             raise HTTPException(status_code=404, detail="Не удалось распарсить документ")
