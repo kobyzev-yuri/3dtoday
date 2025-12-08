@@ -210,23 +210,53 @@ class DocumentParser:
             if pages_to_parse < total_pages:
                 content += f"\n\n[Примечание: документ содержит {total_pages} страниц, обработано {pages_to_parse}]"
             
-            # Извлечение метаданных
-            metadata = pdf_reader.metadata or {}
+            # Извлечение метаданных (безопасная обработка IndirectObject)
+            metadata = {}
+            if pdf_reader.metadata:
+                try:
+                    # Преобразуем метаданные в обычный словарь, обрабатывая IndirectObject
+                    for key, value in pdf_reader.metadata.items():
+                        try:
+                            # Если значение - IndirectObject, получаем его значение
+                            if hasattr(value, 'get_object'):
+                                metadata[key] = str(value.get_object())
+                            else:
+                                metadata[key] = str(value) if value is not None else ""
+                        except Exception:
+                            # Если не удалось обработать, используем строковое представление
+                            metadata[key] = str(value) if value is not None else ""
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка при обработке метаданных PDF: {e}")
+                    metadata = {}
+            
+            # Безопасное извлечение значений метаданных
+            def safe_get_metadata(key, default=""):
+                try:
+                    value = metadata.get(key, default)
+                    if isinstance(value, str):
+                        return value
+                    return str(value) if value is not None else default
+                except Exception:
+                    return default
+            
+            title = safe_get_metadata("/Title", "")
+            if not title:
+                title = Path(source).stem if not source.startswith('http') else "PDF Document"
             
             article_data = {
-                "title": metadata.get("/Title", Path(source).stem if not source.startswith('http') else "PDF Document"),
+                "title": title,
                 "content": content,
                 "url": source if source.startswith('http') else "",
                 "section": "Документация",
-                "date": metadata.get("/CreationDate", ""),
-                "author": metadata.get("/Author"),
+                "date": safe_get_metadata("/CreationDate", ""),
+                "author": safe_get_metadata("/Author"),
                 "tags": [],
                 "images": [],  # PDF изображения требуют отдельной обработки
                 "content_type": "documentation",  # PDF обычно документация
                 "metadata": {
                     "pages": total_pages,
                     "pages_parsed": pages_to_parse,
-                    "pdf_metadata": dict(metadata)
+                    "pdf_metadata": metadata
                 }
             }
             
