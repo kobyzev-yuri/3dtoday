@@ -104,3 +104,4 @@ echo "   - User UI: logs/user_ui.log"
 echo ""
 echo "🛑 Для остановки используйте: ./scripts/stop_interfaces.sh"
 
+

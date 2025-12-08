@@ -237,3 +237,4 @@ URL → ArticleParser → HTML → BeautifulSoup → Структурирова�
 - `docs/STREAMLIT_INTERFACES_GUIDE.md` - руководство по интерфейсам
 
 
+

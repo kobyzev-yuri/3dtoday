@@ -52,7 +52,7 @@ LLM_PROVIDER=ollama
 ### OpenAI/ProxyAPI (из sql4A)
 
 ```env
-OPENAI_API_KEY=sk-0rjJ3guVbISwIjvhypozyF4YEicN2fUY
+OPENAI_API_KEY=your_proxyapi_key_here
 OPENAI_BASE_URL=https://api.proxyapi.ru/openai/v1
 OPENAI_MODEL=gpt-4o
 ```
@@ -64,7 +64,7 @@ OPENAI_MODEL=gpt-4o
 ### Gemini через ProxyAPI.ru
 
 ```env
-GEMINI_API_KEY=sk-0rjJ3guVbISwIjvhypozyF4YEicN2fUY
+GEMINI_API_KEY=your_proxyapi_key_here
 GEMINI_BASE_URL=https://api.proxyapi.ru/google
 GEMINI_MODEL=gemini-3-pro-preview
 ```
@@ -228,6 +228,7 @@ config.env
 - `../sql4A/config.env` — исходная конфигурация
 - `config.env.example` — пример конфигурации
 - `RECOMMENDATIONS.md` — детальные рекомендации по архитектуре
+
 
 
 

@@ -187,3 +187,4 @@ class HybridParser:
 - `backend/app/services/article_parser.py` - парсер статей 3dtoday.ru
 - `docs/PARSER_ERRORS_FIX.md` - исправления парсера
 
+

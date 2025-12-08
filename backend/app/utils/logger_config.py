@@ -92,3 +92,4 @@ def get_vector_db_logger():
     """Логгер для векторной БД"""
     return setup_logger("vector_db", "vector_db.log")
 
+

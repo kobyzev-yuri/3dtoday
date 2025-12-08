@@ -347,3 +347,4 @@
 - `MCP_AGENT_APPROACH.md` - архитектура MCP агентов
 
 
+

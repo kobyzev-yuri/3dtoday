@@ -109,3 +109,4 @@ mcp_timeout = int(os.getenv("MCP_SERVER_TIMEOUT", "180"))
 - `docs/README_CONFIG.md` - документация по конфигурации
 - `frontend/admin_ui.py` - интерфейс администратора с настройками
 
+

@@ -37,3 +37,4 @@ cd /mnt/ai/cnn/3dtoday
 streamlit run frontend/admin_ui.py
 
 
+

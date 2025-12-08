@@ -113,3 +113,4 @@ if __name__ == "__main__":
     print(f"Gemini:  {'✅ Успех' if results.get('gemini') else '❌ Ошибка'}")
     print(f"{'=' * 70}\n")
 
+

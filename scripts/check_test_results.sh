@@ -24,3 +24,4 @@ echo ""
 echo "Последние ошибки с деталями:"
 tail -100 logs/librarian.log 2>/dev/null | grep -A 5 "ERROR" | tail -20
 
+

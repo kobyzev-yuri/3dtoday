@@ -300,3 +300,4 @@ result = await collector.process_and_index_article(
 - `PARSING_AND_TESTING_STRATEGY.md` - стратегия парсинга
 
 
+

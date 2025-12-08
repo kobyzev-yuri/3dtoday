@@ -402,7 +402,7 @@ similar = await rag.search_similar(
 **Ключевые настройки из sql4A:**
 ```env
 # Используется тот же ProxyAPI ключ
-OPENAI_API_KEY=sk-0rjJ3guVbISwIjvhypozyF4YEicN2fUY
+OPENAI_API_KEY=your_proxyapi_key_here
 OPENAI_BASE_URL=https://api.proxyapi.ru/openai/v1
 
 # Используется та же БД (если используется pgvector)
@@ -415,7 +415,7 @@ HF_MODEL_NAME=intfloat/multilingual-e5-base
 **Дополнительные настройки для 3dtoday:**
 ```env
 # Gemini через ProxyAPI.ru (для анализа изображений)
-GEMINI_API_KEY=sk-0rjJ3guVbISwIjvhypozyF4YEicN2fUY
+GEMINI_API_KEY=your_proxyapi_key_here
 GEMINI_BASE_URL=https://api.proxyapi.ru/google
 GEMINI_MODEL=gemini-3-pro-preview
 

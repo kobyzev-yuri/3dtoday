@@ -59,6 +59,10 @@ tmp/
 temp/
 *.tmp
 
+# Test results
+*_test_result.json
+test_results/
+
 # OS
 .DS_Store
 Thumbs.db

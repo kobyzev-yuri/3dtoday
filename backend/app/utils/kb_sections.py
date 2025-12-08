@@ -120,3 +120,4 @@ def get_relevant_sections_for_problem(problem_type: str) -> list:
     return relevant if relevant else ["Техничка"]  # По умолчанию Техничка
 
 
+

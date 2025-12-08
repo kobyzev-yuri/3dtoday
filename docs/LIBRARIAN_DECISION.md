@@ -206,3 +206,4 @@
 - `docs/MCP_INTEGRATION.md` - интеграция через MCP
 
 
+

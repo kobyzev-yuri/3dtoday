@@ -184,3 +184,4 @@ async def _detect_page_type(self, url: str) -> str:
 - `docs/TROUBLESHOOTING.md` - решение проблем
 
 
+

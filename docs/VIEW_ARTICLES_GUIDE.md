@@ -256,3 +256,4 @@ print(f"Экспортировано {len(data['articles'])} статей")
 - `backend/app/mcp/kb_mcp_server.py` - MCP инструменты
 - `docs/KB_STATISTICS_GUIDE.md` - статистика KB
 
+

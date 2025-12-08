@@ -922,9 +922,35 @@ async def diagnose_problem(request: DiagnosticRequest):
             confidence=confidence
         )
         
+    except HTTPException:
+        raise
+    except ConnectionError as e:
+        error_msg = str(e)
+        if "ollama" in error_msg.lower() or "connection refused" in error_msg.lower():
+            logger.error(f"Ошибка подключения к LLM сервису: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "LLM сервис недоступен. "
+                    "Убедитесь, что Ollama запущен (ollama serve) или настройте другой провайдер (Gemini/OpenAI) в config.env"
+                )
+            )
+        else:
+            logger.error(f"Ошибка подключения: {e}", exc_info=True)
+            raise HTTPException(status_code=503, detail=f"Ошибка подключения к сервису: {error_msg}")
     except Exception as e:
         logger.error(f"Ошибка диагностики: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        # Проверяем, не связана ли ошибка с недоступностью LLM
+        if "connection refused" in error_msg.lower() or "errno 111" in error_msg.lower():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "LLM сервис недоступен. "
+                    "Проверьте настройки LLM_PROVIDER в config.env и убедитесь, что выбранный провайдер запущен и доступен."
+                )
+            )
+        raise HTTPException(status_code=500, detail=f"Ошибка диагностики: {error_msg}")
 
 
 @app.post("/api/diagnose/image")

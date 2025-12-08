@@ -99,6 +99,8 @@ streamlit run streamlit_app.py
 Основные настройки в `config.env`:
 
 - **LLM_PROVIDER**: `ollama` (локально), `openai` (ProxyAPI) или `gemini` (ProxyAPI)
+  - Система автоматически переключается на доступный провайдер при недоступности основного
+  - Порядок fallback: ollama → gemini → openai (или в зависимости от настроек)
 - **QDRANT_HOST**: хост Qdrant (по умолчанию `localhost`)
 - **QDRANT_PORT**: порт Qdrant (по умолчанию `6333`)
 - **QDRANT_COLLECTION**: коллекция для текстовых эмбеддингов (по умолчанию `kb_3dtoday`)

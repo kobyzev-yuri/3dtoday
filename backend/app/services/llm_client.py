@@ -32,15 +32,46 @@ class LLMClient:
         self._initialize_client()
     
     def _initialize_client(self):
-        """Инициализация клиента в зависимости от провайдера"""
+        """Инициализация клиента в зависимости от провайдера с автоматическим fallback"""
+        providers_to_try = []
+        
+        # Определяем порядок попыток инициализации
         if self.provider == "ollama":
-            self._init_ollama()
-        elif self.provider == "openai":
-            self._init_openai()
+            providers_to_try = ["ollama", "gemini", "openai"]
         elif self.provider == "gemini":
-            self._init_gemini()
+            providers_to_try = ["gemini", "openai", "ollama"]
+        elif self.provider == "openai":
+            providers_to_try = ["openai", "gemini", "ollama"]
         else:
-            raise ValueError(f"Неизвестный провайдер LLM: {self.provider}")
+            # По умолчанию пробуем все провайдеры в порядке приоритета
+            providers_to_try = ["gemini", "openai", "ollama"]
+        
+        last_error = None
+        for provider in providers_to_try:
+            try:
+                if provider == "ollama":
+                    self._init_ollama()
+                elif provider == "openai":
+                    self._init_openai()
+                elif provider == "gemini":
+                    self._init_gemini()
+                else:
+                    continue
+                
+                # Если инициализация успешна, обновляем провайдер
+                if provider != self.provider:
+                    logger.info(f"✅ Используется провайдер {provider} (вместо {self.provider})")
+                    self.provider = provider
+                return
+            except Exception as e:
+                last_error = e
+                logger.warning(f"⚠️ Не удалось инициализировать {provider}: {e}")
+                continue
+        
+        # Если все провайдеры недоступны
+        error_msg = f"Не удалось инициализировать ни один LLM провайдер. Последняя ошибка: {last_error}"
+        logger.error(f"❌ {error_msg}")
+        raise RuntimeError(error_msg)
     
     def _get_available_models(self) -> List[str]:
         """Получение списка доступных моделей Ollama"""
@@ -85,8 +116,9 @@ class LLMClient:
             self.temperature = float(os.getenv("OLLAMA_TEMPERATURE", "0.2"))
             self.timeout = int(os.getenv("OLLAMA_TIMEOUT", "500"))
             
-            # Проверка доступности Ollama
-            self._check_ollama_available()
+            # Проверка доступности Ollama (не критично, если есть fallback)
+            if not self._check_ollama_available():
+                raise ConnectionError(f"Ollama недоступен по адресу {self.ollama_url}")
             
             self.client = httpx.AsyncClient(
                 base_url=self.ollama_url,
@@ -164,12 +196,14 @@ class LLMClient:
             response = httpx.get(f"{self.ollama_url}/api/tags", timeout=5)
             if response.status_code == 200:
                 logger.info("✅ Ollama сервер доступен")
+                return True
             else:
-                raise ConnectionError(f"Ollama недоступен (status={response.status_code})")
+                logger.warning(f"⚠️ Ollama недоступен (status={response.status_code})")
+                return False
         except Exception as e:
             logger.warning(f"⚠️  Ollama недоступен: {e}")
             logger.warning("💡 Запустите Ollama: ollama serve")
-            raise
+            return False
     
     async def generate(
         self,
@@ -366,8 +400,35 @@ class LLMClient:
                 # Проверяем причину завершения
                 if finish_reason == "MAX_TOKENS":
                     logger.warning(f"⚠️ Gemini достиг лимита токенов (finishReason: {finish_reason})")
+                elif finish_reason == "SAFETY":
+                    logger.warning(f"⚠️ Gemini заблокировал ответ по соображениям безопасности (finishReason: {finish_reason})")
+                    raise Exception(f"Gemini заблокировал ответ по соображениям безопасности. Попробуйте переформулировать запрос.")
+                elif finish_reason == "RECITATION":
+                    logger.warning(f"⚠️ Gemini заблокировал ответ из-за рецитации (finishReason: {finish_reason})")
+                    raise Exception(f"Gemini заблокировал ответ из-за рецитации. Попробуйте переформулировать запрос.")
                 
                 content = candidate.get("content", {})
+                
+                # Проверяем, есть ли content и не пустой ли он
+                if not content:
+                    # Пустой content может означать, что Gemini использовал thinking tokens, но не сгенерировал текст
+                    usage_metadata = result.get("usageMetadata", {})
+                    thoughts_token_count = usage_metadata.get("thoughtsTokenCount", 0)
+                    
+                    if thoughts_token_count > 0:
+                        logger.warning(f"⚠️ Gemini использовал thinking tokens ({thoughts_token_count}), но не вернул текст (finishReason: {finish_reason})")
+                        raise Exception(
+                            f"Gemini использовал thinking tokens, но не сгенерировал видимый текст. "
+                            f"Возможно, модель решила, что ответ не требуется, или произошла ошибка. "
+                            f"Попробуйте переформулировать запрос или использовать другую модель."
+                        )
+                    else:
+                        logger.warning(f"⚠️ Gemini вернул пустой content (finishReason: {finish_reason})")
+                        raise Exception(
+                            f"Gemini вернул пустой ответ (finishReason: {finish_reason}). "
+                            f"Попробуйте переформулировать запрос или увеличить maxOutputTokens."
+                        )
+                
                 parts = content.get("parts", [])
                 if parts:
                     text = parts[0].get("text", "")
@@ -375,14 +436,25 @@ class LLMClient:
                         logger.debug(f"✅ Gemini ответ получен ({len(text)} символов)")
                         return text
                     else:
-                        logger.warning(f"⚠️ Gemini вернул пустой текст (finishReason: {finish_reason})")
+                        logger.warning(f"⚠️ Gemini вернул пустой текст в parts (finishReason: {finish_reason})")
                         # Если текст пустой, но есть finishReason, возвращаем сообщение об ошибке
                         if finish_reason:
-                            raise Exception(f"Gemini вернул пустой ответ (finishReason: {finish_reason}). Попробуйте увеличить maxOutputTokens.")
+                            raise Exception(f"Gemini вернул пустой текст (finishReason: {finish_reason}). Попробуйте увеличить maxOutputTokens или переформулировать запрос.")
                 else:
-                    logger.warning(f"⚠️ Gemini не вернул parts в content (finishReason: {finish_reason})")
+                    logger.warning(f"⚠️ Gemini не вернул parts в content (finishReason: {finish_reason}, content: {content})")
+                    raise Exception(
+                        f"Gemini не вернул parts в content (finishReason: {finish_reason}). "
+                        f"Возможно, модель использовала thinking tokens без генерации текста. "
+                        f"Попробуйте переформулировать запрос."
+                    )
             
-            raise Exception(f"Пустой ответ от Gemini. Ответ: {result}")
+            # Если нет candidates или они пустые
+            usage_metadata = result.get("usageMetadata", {})
+            error_msg = f"Пустой ответ от Gemini. "
+            if usage_metadata:
+                error_msg += f"Использовано токенов: {usage_metadata.get('totalTokenCount', 0)}. "
+            error_msg += f"Ответ: {result}"
+            raise Exception(error_msg)
             
         except httpx.HTTPError as e:
             logger.error(f"❌ HTTP ошибка Gemini: {e.response.status_code if hasattr(e, 'response') else 'unknown'} - {e.response.text[:200] if hasattr(e, 'response') else str(e)}")

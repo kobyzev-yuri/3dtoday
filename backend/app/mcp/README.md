@@ -114,3 +114,4 @@ async with stdio_client(server_params) as (read, write):
 - Все инструменты работают синхронно, но используют async методы внутри
 
 
+

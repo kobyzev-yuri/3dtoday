@@ -111,3 +111,4 @@ Streamlit UI → FastAPI → MCP Client → KB MCP Server → Инструмен
 - `docs/URL_PARSING_GUIDE.md` - руководство по парсингу
 
 
+

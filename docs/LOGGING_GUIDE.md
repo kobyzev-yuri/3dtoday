@@ -170,3 +170,4 @@ logger.warning(f"⚠️ Таймаут: {elapsed_time:.2f} сек > {timeout} с
 - `config.env` - настройки уровня логирования
 - `docs/TIMEOUT_ANALYSIS.md` - анализ таймаутов
 
+

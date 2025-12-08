@@ -215,3 +215,4 @@ parse_document("https://3dtoday.ru/...", "auto")
 - `docs/MCP_INTEGRATION.md` - интеграция через MCP
 
 
+

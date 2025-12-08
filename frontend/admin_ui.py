@@ -27,6 +27,31 @@ st.set_page_config(
 st.title("📚 Управление базой знаний")
 st.markdown("---")
 
+# Проверка статуса успешного добавления (после rerun)
+if "add_success_status" in st.session_state:
+    success_info = st.session_state.add_success_status
+    st.success(f"✅ {success_info.get('message', 'Статья успешно добавлена в KB!')}")
+    if success_info.get('article_id'):
+        st.info(f"**ID статьи:** `{success_info['article_id']}`")
+    # Удаляем статус после отображения
+    del st.session_state.add_success_status
+    st.markdown("---")
+
+# Восстановление данных парсинга из pending (если были сохранены перед запросом)
+if "pending_add_parsed_document" in st.session_state and "pending_add_review" in st.session_state:
+    # Восстанавливаем данные парсинга для повторной попытки
+    if "parsed_document" not in st.session_state:
+        st.session_state.parsed_document = st.session_state.pending_add_parsed_document
+    if "review" not in st.session_state:
+        st.session_state.review = st.session_state.pending_add_review
+    if "admin_decision" not in st.session_state and "pending_add_admin_decision" in st.session_state:
+        st.session_state.admin_decision = st.session_state.pending_add_admin_decision
+    # Очищаем pending данные после восстановления
+    del st.session_state.pending_add_parsed_document
+    del st.session_state.pending_add_review
+    if "pending_add_admin_decision" in st.session_state:
+        del st.session_state.pending_add_admin_decision
+
 # Боковая панель
 with st.sidebar:
     st.header("⚙️ Настройки")
@@ -238,7 +263,183 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
         
         submitted_llm = st.form_submit_button("🤖 Анализировать через LLM", type="primary", use_container_width=True)
     
-    if submitted_llm and source:
+    # Проверяем наличие уже распарсенного документа в session_state
+    if "llm_parsed_document" in st.session_state and st.session_state.llm_parsed_document:
+        parsed_document = st.session_state.llm_parsed_document
+        source = st.session_state.get("llm_source", "")
+        llm_provider_choice = st.session_state.get("llm_provider_choice", "openai")
+        model_choice = st.session_state.get("llm_model_choice", "gpt-4o")
+        
+        st.success(f"✅ URL успешно проанализирован через {llm_provider_choice.upper()} ({model_choice})!")
+        
+        # Отображение результата
+        st.subheader("📄 Результат анализа LLM")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Заголовок:**", parsed_document.get("title", ""))
+            st.write("**Раздел:**", parsed_document.get("section", "unknown"))
+            st.write("**Тип контента:**", parsed_document.get("content_type", "article"))
+            st.write("**Релевантность:**", f"{parsed_document.get('relevance_score', 0):.2f}")
+            st.write("**Качество:**", f"{parsed_document.get('quality_score', 0):.2f}")
+        
+        with col2:
+            st.write("**URL:**", parsed_document.get("url", source))
+            st.write("**Дата:**", parsed_document.get("date", ""))
+            if parsed_document.get("author"):
+                st.write("**Автор:**", parsed_document["author"])
+            if parsed_document.get("tags"):
+                st.write("**Теги:**", ", ".join(parsed_document["tags"]))
+        
+        # Abstract
+        if parsed_document.get("abstract"):
+            st.subheader("📝 Abstract")
+            st.info(parsed_document["abstract"])
+        
+        # Содержимое
+        if parsed_document.get("content"):
+            with st.expander("📄 Содержимое"):
+                st.markdown(parsed_document["content"][:2000] + "..." if len(parsed_document["content"]) > 2000 else parsed_document["content"])
+        
+        # Детали
+        if parsed_document.get("problem"):
+            st.subheader("🔍 Детали")
+            st.write("**Проблема:**", parsed_document["problem"])
+            
+            if parsed_document.get("symptoms"):
+                st.write("**Симптомы:**")
+                for symptom in parsed_document["symptoms"]:
+                    st.write(f"- {symptom}")
+            
+            if parsed_document.get("solutions"):
+                st.write("**Решения:**")
+                for i, solution in enumerate(parsed_document["solutions"], 1):
+                    if isinstance(solution, dict):
+                        st.write(f"{i}. {solution.get('description', '')}")
+                    else:
+                        st.write(f"{i}. {solution}")
+        
+        # Решение администратора
+        st.markdown("---")
+        st.subheader("👤 Решение администратора")
+        
+        if "admin_decision" not in st.session_state or st.session_state.admin_decision is None:
+            is_relevant = parsed_document.get("is_relevant", False)
+            st.session_state.admin_decision = "approve" if is_relevant else "needs_review"
+        
+        admin_decision = st.radio(
+            "Ваше решение:",
+            ["approve", "reject", "needs_review"],
+            index=["approve", "reject", "needs_review"].index(st.session_state.admin_decision) if st.session_state.admin_decision in ["approve", "reject", "needs_review"] else 0,
+            format_func=lambda x: {
+                "approve": "✅ Одобрить и добавить в KB",
+                "reject": "❌ Отклонить",
+                "needs_review": "⚠️ Требуется дополнительная проверка"
+            }.get(x, x)
+        )
+        
+        st.session_state.admin_decision = admin_decision
+        
+        # Кнопка добавления
+        if admin_decision == "approve":
+            if st.button("✅ Добавить в KB", type="primary", use_container_width=True):
+                # Сохраняем данные парсинга перед запросом (на случай ошибки)
+                st.session_state.pending_add_parsed_document = parsed_document
+                st.session_state.pending_add_review = {
+                    "decision": "approve",
+                    "relevance_score": parsed_document.get("relevance_score", 0.0),
+                    "quality_score": parsed_document.get("quality_score", 0.0),
+                    "summary": parsed_document
+                }
+                st.session_state.pending_add_admin_decision = admin_decision
+                
+                try:
+                    # Увеличиваем таймаут для индексации (может занимать много времени)
+                    api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
+                    index_timeout = max(float(api_timeout), 600.0)  # Минимум 10 минут для индексации
+                    
+                    with st.spinner(f"💾 Индексация статьи... (это может занять до {int(index_timeout/60)} минут)"):
+                        with httpx.Client(timeout=index_timeout) as add_client:
+                            add_response = add_client.post(
+                                f"{API_BASE_URL}/api/kb/articles/add_from_parse",
+                                json={
+                                    "parsed_document": parsed_document,
+                                    "review": {
+                                        "decision": "approve",
+                                        "relevance_score": parsed_document.get("relevance_score", 0.0),
+                                        "quality_score": parsed_document.get("quality_score", 0.0),
+                                        "summary": parsed_document
+                                    },
+                                    "admin_decision": admin_decision,
+                                    "relevance_threshold": st.session_state.relevance_threshold
+                                },
+                                timeout=index_timeout
+                            )
+                            
+                            if add_response.status_code == 200:
+                                result = add_response.json()
+                                # Сохраняем статус успеха перед rerun
+                                st.session_state.add_success_status = {
+                                    "message": "Статья успешно добавлена в KB!",
+                                    "article_id": result.get('article_id', 'unknown')
+                                }
+                                # Очищаем pending данные
+                                if "pending_add_parsed_document" in st.session_state:
+                                    del st.session_state.pending_add_parsed_document
+                                if "pending_add_review" in st.session_state:
+                                    del st.session_state.pending_add_review
+                                if "pending_add_admin_decision" in st.session_state:
+                                    del st.session_state.pending_add_admin_decision
+                                # Очищаем данные парсинга после успешного добавления
+                                if "llm_parsed_document" in st.session_state:
+                                    del st.session_state.llm_parsed_document
+                                if "llm_source" in st.session_state:
+                                    del st.session_state.llm_source
+                                if "llm_provider_choice" in st.session_state:
+                                    del st.session_state.llm_provider_choice
+                                if "llm_model_choice" in st.session_state:
+                                    del st.session_state.llm_model_choice
+                                if "admin_decision" in st.session_state:
+                                    del st.session_state.admin_decision
+                                st.rerun()
+                            else:
+                                error_detail = add_response.json().get('detail', add_response.text) if add_response.headers.get('content-type', '').startswith('application/json') else add_response.text
+                                st.error(f"❌ Ошибка добавления: {error_detail}")
+                                # Очищаем pending данные при ошибке
+                                if "pending_add_parsed_document" in st.session_state:
+                                    del st.session_state.pending_add_parsed_document
+                                if "pending_add_review" in st.session_state:
+                                    del st.session_state.pending_add_review
+                                if "pending_add_admin_decision" in st.session_state:
+                                    del st.session_state.pending_add_admin_decision
+                except httpx.TimeoutException as e:
+                    st.error(f"⏱️ Превышено время ожидания ответа ({int(index_timeout)} секунд)")
+                    st.warning("💡 Индексация статьи может занимать много времени из-за генерации эмбеддингов.")
+                    st.info("**Рекомендации:**")
+                    st.markdown("""
+                    - Убедитесь, что FastAPI сервер запущен
+                    - Проверьте, что модель эмбеддингов загружена
+                    - Попробуйте еще раз или увеличьте таймаут в настройках
+                    """)
+                    # Очищаем pending данные при таймауте
+                    if "pending_add_parsed_document" in st.session_state:
+                        del st.session_state.pending_add_parsed_document
+                    if "pending_add_review" in st.session_state:
+                        del st.session_state.pending_add_review
+                    if "pending_add_admin_decision" in st.session_state:
+                        del st.session_state.pending_add_admin_decision
+                except Exception as e:
+                    st.error(f"❌ Ошибка подключения к API: {e}")
+                    # Очищаем pending данные при ошибке
+                    if "pending_add_parsed_document" in st.session_state:
+                        del st.session_state.pending_add_parsed_document
+                    if "pending_add_review" in st.session_state:
+                        del st.session_state.pending_add_review
+                    if "pending_add_admin_decision" in st.session_state:
+                        del st.session_state.pending_add_admin_decision
+    
+    elif submitted_llm and source:
         api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
         actual_timeout = max(api_timeout, 300)
         
@@ -258,6 +459,12 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
                     if response.status_code == 200:
                         result = response.json()
                         parsed_document = result.get("parsed_document", {})
+                        
+                        # Сохраняем в session_state для сохранения после rerun
+                        st.session_state.llm_parsed_document = parsed_document
+                        st.session_state.llm_source = source
+                        st.session_state.llm_provider_choice = llm_provider_choice
+                        st.session_state.llm_model_choice = model_choice
                         
                         st.success(f"✅ URL успешно проанализирован через {llm_provider_choice.upper()} ({result.get('model', 'unknown')})!")
                         
@@ -353,7 +560,20 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
                                         
                                         if add_response.status_code == 200:
                                             result = add_response.json()
-                                            st.success(f"✅ Статья успешно добавлена в KB! ID: {result.get('article_id', 'unknown')}")
+                                            # Сохраняем статус успеха перед rerun
+                                            st.session_state.add_success_status = {
+                                                "message": "Статья успешно добавлена в KB!",
+                                                "article_id": result.get('article_id', 'unknown')
+                                            }
+                                            # Очищаем данные парсинга после успешного добавления
+                                            if "llm_parsed_document" in st.session_state:
+                                                del st.session_state.llm_parsed_document
+                                            if "llm_source" in st.session_state:
+                                                del st.session_state.llm_source
+                                            if "llm_provider_choice" in st.session_state:
+                                                del st.session_state.llm_provider_choice
+                                            if "llm_model_choice" in st.session_state:
+                                                del st.session_state.llm_model_choice
                                             if "admin_decision" in st.session_state:
                                                 del st.session_state.admin_decision
                                             st.rerun()
@@ -392,7 +612,329 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
         
         submitted_url = st.form_submit_button("📥 Скачать и проанализировать документ", use_container_width=True)
     
-    if submitted_url and source:
+    # Проверяем наличие уже распарсенного документа в session_state (после rerun)
+    if "parsed_document" in st.session_state and st.session_state.parsed_document:
+        parsed_document = st.session_state.parsed_document
+        review = st.session_state.get("review", {})
+        summary = review.get("summary", {})
+        source = st.session_state.get("document_source", "")
+        
+        st.success("✅ Документ успешно скачан и проанализирован!")
+        
+        # Решение библиотекаря
+        decision = review.get("decision", "needs_review")
+        reason = review.get("reason", "")
+        relevance_score = review.get("relevance_score", 0.0)
+        quality_score = review.get("quality_score", 0.0)
+        
+        st.subheader("📋 Решение библиотекаря")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if decision == "approve":
+                st.success(f"✅ **Одобрено**")
+            elif decision == "reject":
+                st.error(f"❌ **Отклонено**")
+            else:
+                st.warning(f"⚠️ **Требуется проверка**")
+        
+        with col2:
+            threshold = st.session_state.relevance_threshold
+            threshold_color = "normal" if relevance_score >= threshold else "inverse"
+            st.metric(
+                "Релевантность",
+                f"{relevance_score:.2f}",
+                delta=f"Порог: {threshold:.2f}",
+                delta_color=threshold_color
+            )
+        
+        with col3:
+            st.metric("Качество", f"{quality_score:.2f}")
+        
+        st.info(f"**Причина:** {reason}")
+        
+        # Решение администратора
+        st.markdown("---")
+        st.subheader("👤 Решение администратора")
+        
+        # Инициализация admin_decision из session_state или из решения библиотекаря
+        if "admin_decision" not in st.session_state or st.session_state.admin_decision is None:
+            st.session_state.admin_decision = decision
+        
+        admin_decision = st.radio(
+            "Ваше решение:",
+            ["approve", "reject", "needs_review"],
+            index=["approve", "reject", "needs_review"].index(st.session_state.admin_decision) if st.session_state.admin_decision in ["approve", "reject", "needs_review"] else 2,
+            format_func=lambda x: {
+                "approve": "✅ Одобрить и добавить в KB",
+                "reject": "❌ Отклонить",
+                "needs_review": "⚠️ Требуется дополнительная проверка"
+            }.get(x, x),
+            help="Вы можете переопределить решение библиотекаря"
+        )
+        
+        st.session_state.admin_decision = admin_decision
+        
+        # Предупреждение если решение переопределено
+        if admin_decision != decision:
+            if admin_decision == "approve" and decision == "reject":
+                st.warning("⚠️ Вы одобряете статью, отклоненную библиотекарем")
+            elif admin_decision == "reject" and decision == "approve":
+                st.warning("⚠️ Вы отклоняете статью, одобренную библиотекарем")
+        
+        # Предупреждение если релевантность ниже порога
+        if relevance_score < st.session_state.relevance_threshold and admin_decision == "approve":
+            st.warning(
+                f"⚠️ Релевантность ({relevance_score:.2f}) ниже установленного порога "
+                f"({st.session_state.relevance_threshold:.2f})"
+            )
+        
+        # Проверка на дублирование
+        duplicate_check = review.get("duplicate_check", {})
+        if duplicate_check.get("is_duplicate"):
+            st.warning("⚠️ **Обнаружены похожие документы в KB:**")
+            for i, similar_title in enumerate(duplicate_check.get("similar_docs", [])[:3], 1):
+                st.write(f"{i}. {similar_title}")
+        
+        # Abstract
+        abstract = review.get("abstract", "")
+        if abstract:
+            st.subheader("📝 Abstract (краткое изложение)")
+            st.info(abstract)
+        
+        st.markdown("---")
+        
+        # Отображение результатов
+        st.subheader("📄 Распарсенный документ")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Заголовок:**", parsed_document.get("title", ""))
+            st.write("**Тип контента:**", parsed_document.get("content_type", "article"))
+            st.write("**Раздел:**", parsed_document.get("section", "unknown"))
+            st.write("**Дата:**", parsed_document.get("date", ""))
+            if parsed_document.get("author"):
+                st.write("**Автор:**", parsed_document["author"])
+        
+        with col2:
+            st.write("**Источник:**", source[:100] if len(source) > 100 else source)
+            if parsed_document.get("url"):
+                st.write("**URL:**", parsed_document["url"])
+            if parsed_document.get("tags"):
+                st.write("**Теги:**", ", ".join(parsed_document["tags"]))
+            st.write("**Изображений:**", len(parsed_document.get("images", [])))
+        
+        # Краткое изложение от агента-библиотекаря
+        st.subheader("📋 Краткое изложение (от агента-библиотекаря)")
+        
+        content_type = summary.get("content_type", "article") if summary else "article"
+        st.info(f"**Тип контента:** {content_type}")
+        
+        if summary:
+            st.markdown(summary.get("summary", ""))
+        
+        # Детали изложения в зависимости от типа контента
+        with st.expander("🔍 Детали анализа"):
+            if content_type == "article":
+                st.write("**Проблема:**", summary.get("problem", ""))
+                
+                if summary.get("symptoms"):
+                    st.write("**Симптомы:**")
+                    for symptom in summary["symptoms"]:
+                        st.write(f"- {symptom}")
+                
+                if summary.get("solutions"):
+                    st.write("**Решения:**")
+                    for i, solution in enumerate(summary["solutions"], 1):
+                        st.write(f"{i}. {solution.get('description', '')}")
+                        if solution.get("parameters"):
+                            st.write(f"   Параметры: {solution['parameters']}")
+                
+                if summary.get("printer_models"):
+                    st.write("**Принтеры:**", ", ".join(summary["printer_models"]))
+                
+                if summary.get("materials"):
+                    st.write("**Материалы:**", ", ".join(summary["materials"]))
+            
+            elif content_type == "documentation":
+                st.write("**Тип документации:**", summary.get("documentation_type", ""))
+                if summary.get("equipment_models"):
+                    st.write("**Модели оборудования:**", ", ".join(summary["equipment_models"]))
+                if summary.get("key_specifications"):
+                    st.write("**Характеристики:**")
+                    for k, v in summary["key_specifications"].items():
+                        st.write(f"- {k}: {v}")
+            
+            elif content_type == "comparison":
+                st.write("**Тип сравнения:**", summary.get("comparison_type", ""))
+                if summary.get("compared_items"):
+                    st.write("**Сравниваемые варианты:**", ", ".join(summary["compared_items"]))
+                if summary.get("key_differences"):
+                    st.write("**Ключевые отличия:**")
+                    for item, diffs in summary["key_differences"].items():
+                        st.write(f"- **{item}**: {', '.join(diffs)}")
+            
+            elif content_type == "technical":
+                st.write("**Тема:**", summary.get("topic", ""))
+                if summary.get("key_characteristics"):
+                    st.write("**Характеристики:**")
+                    for k, v in summary["key_characteristics"].items():
+                        st.write(f"- {k}: {v}")
+            
+            if summary.get("key_points"):
+                st.write("**Ключевые моменты:**")
+                for kp in summary["key_points"]:
+                    st.write(f"- {kp}")
+        
+        # Изображения из документа
+        if parsed_document.get("images"):
+            st.subheader("🖼️ Изображения из документа")
+            for i, img in enumerate(parsed_document["images"][:5], 1):  # Показываем первые 5
+                with st.expander(f"Изображение {i}: {img.get('alt', 'Без описания')}"):
+                    try:
+                        st.image(img["url"], use_container_width=True)
+                    except:
+                        st.info(f"Не удалось загрузить изображение: {img['url']}")
+                    if img.get("description"):
+                        st.caption(img["description"])
+        
+        # Рекомендации библиотекаря
+        recommendations = review.get("recommendations", [])
+        if recommendations:
+            st.subheader("💡 Рекомендации библиотекаря")
+            for rec in recommendations:
+                st.write(f"- {rec}")
+        
+        # Кнопки действий в зависимости от решения администратора
+        st.markdown("---")
+        st.subheader("🎯 Действия")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if admin_decision == "approve":
+                                if st.button("✅ Добавить в KB", type="primary", use_container_width=True):
+                                    # Сохраняем данные перед запросом
+                                    st.session_state.pending_add_parsed_document = parsed_document
+                                    st.session_state.pending_add_review = review
+                                    st.session_state.pending_add_admin_decision = admin_decision
+                                    
+                                    # Добавление статьи в KB
+                                    try:
+                                        # Увеличиваем таймаут для индексации
+                                        api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
+                                        index_timeout = max(float(api_timeout), 600.0)  # Минимум 10 минут
+                                        
+                                        with st.spinner(f"💾 Индексация статьи... (это может занять до {int(index_timeout/60)} минут)"):
+                                            with httpx.Client(timeout=index_timeout) as client:
+                                                add_response = client.post(
+                                                    f"{API_BASE_URL}/api/kb/articles/add_from_parse",
+                                                    json={
+                                                        "parsed_document": parsed_document,
+                                                        "review": review,
+                                                        "admin_decision": admin_decision,
+                                                        "relevance_threshold": st.session_state.relevance_threshold
+                                                    },
+                                                    timeout=index_timeout
+                                                )
+                                                
+                                                if add_response.status_code == 200:
+                                                    result = add_response.json()
+                                                    # Сохраняем статус успеха перед rerun
+                                                    st.session_state.add_success_status = {
+                                                        "message": "Статья успешно добавлена в KB!",
+                                                        "article_id": result.get('article_id', 'unknown')
+                                                    }
+                                                    # Очищаем pending данные
+                                                    if "pending_add_parsed_document" in st.session_state:
+                                                        del st.session_state.pending_add_parsed_document
+                                                    if "pending_add_review" in st.session_state:
+                                                        del st.session_state.pending_add_review
+                                                    if "pending_add_admin_decision" in st.session_state:
+                                                        del st.session_state.pending_add_admin_decision
+                                                    # Очистка session state
+                                                    if "parsed_document" in st.session_state:
+                                                        del st.session_state.parsed_document
+                                                    if "review" in st.session_state:
+                                                        del st.session_state.review
+                                                    if "summary" in st.session_state:
+                                                        del st.session_state.summary
+                                                    if "document_source" in st.session_state:
+                                                        del st.session_state.document_source
+                                                    if "admin_decision" in st.session_state:
+                                                        del st.session_state.admin_decision
+                                                    st.rerun()
+                                                else:
+                                                    error_detail = add_response.json().get('detail', add_response.text) if add_response.headers.get('content-type', '').startswith('application/json') else add_response.text
+                                                    st.error(f"❌ Ошибка добавления: {error_detail}")
+                                                    # Очищаем pending данные при ошибке
+                                                    if "pending_add_parsed_document" in st.session_state:
+                                                        del st.session_state.pending_add_parsed_document
+                                                    if "pending_add_review" in st.session_state:
+                                                        del st.session_state.pending_add_review
+                                                    if "pending_add_admin_decision" in st.session_state:
+                                                        del st.session_state.pending_add_admin_decision
+                                    except httpx.TimeoutException as e:
+                                        st.error(f"⏱️ Превышено время ожидания ответа ({int(index_timeout)} секунд)")
+                                        st.warning("💡 Индексация статьи может занимать много времени из-за генерации эмбеддингов.")
+                                        st.info("**Рекомендации:**")
+                                        st.markdown("""
+                                        - Убедитесь, что FastAPI сервер запущен
+                                        - Проверьте, что модель эмбеддингов загружена
+                                        - Попробуйте еще раз или увеличьте таймаут в настройках
+                                        """)
+                                        # Очищаем pending данные при таймауте
+                                        if "pending_add_parsed_document" in st.session_state:
+                                            del st.session_state.pending_add_parsed_document
+                                        if "pending_add_review" in st.session_state:
+                                            del st.session_state.pending_add_review
+                                        if "pending_add_admin_decision" in st.session_state:
+                                            del st.session_state.pending_add_admin_decision
+                                    except Exception as e:
+                                        st.error(f"❌ Ошибка подключения к API: {e}")
+                                        # Очищаем pending данные при ошибке
+                                        if "pending_add_parsed_document" in st.session_state:
+                                            del st.session_state.pending_add_parsed_document
+                                        if "pending_add_review" in st.session_state:
+                                            del st.session_state.pending_add_review
+                                        if "pending_add_admin_decision" in st.session_state:
+                                            del st.session_state.pending_add_admin_decision
+            elif admin_decision == "reject":
+                st.info("📋 Документ отклонен. Он не будет добавлен в KB.")
+                if st.button("🔄 Очистить форму", use_container_width=True):
+                    if "parsed_document" in st.session_state:
+                        del st.session_state.parsed_document
+                    if "review" in st.session_state:
+                        del st.session_state.review
+                    if "summary" in st.session_state:
+                        del st.session_state.summary
+                    if "document_source" in st.session_state:
+                        del st.session_state.document_source
+                    if "admin_decision" in st.session_state:
+                        del st.session_state.admin_decision
+                    st.rerun()
+            else:  # needs_review
+                st.warning("⚠️ Требуется дополнительная проверка перед добавлением в KB")
+                if st.button("💾 Сохранить для проверки", use_container_width=True):
+                    st.info("💡 Документ сохранен в сессии. Вы можете вернуться к нему позже.")
+        
+        with col2:
+            if st.button("🔄 Сбросить решение", use_container_width=True):
+                if "parsed_document" in st.session_state:
+                    del st.session_state.parsed_document
+                if "review" in st.session_state:
+                    del st.session_state.review
+                if "summary" in st.session_state:
+                    del st.session_state.summary
+                if "document_source" in st.session_state:
+                    del st.session_state.document_source
+                if "admin_decision" in st.session_state:
+                    del st.session_state.admin_decision
+                st.rerun()
+    
+    elif submitted_url and source:
         api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
         mcp_timeout = st.session_state.get("timeout_values", {}).get("MCP сервер", int(os.getenv("MCP_SERVER_TIMEOUT", "300")))
         
@@ -639,7 +1181,11 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                                             
                                             if add_response.status_code == 200:
                                                 result = add_response.json()
-                                                st.success(f"✅ Статья успешно добавлена в KB! ID: {result.get('article_id', 'unknown')}")
+                                                # Сохраняем статус успеха перед rerun
+                                                st.session_state.add_success_status = {
+                                                    "message": "Статья успешно добавлена в KB!",
+                                                    "article_id": result.get('article_id', 'unknown')
+                                                }
                                                 # Очистка session state
                                                 if "parsed_document" in st.session_state:
                                                     del st.session_state.parsed_document
@@ -833,9 +1379,11 @@ elif input_method == "📝 Ручной ввод":
                                 
                                 if response.status_code == 200:
                                     result = response.json()
-                                    st.success(f"✅ Статья успешно добавлена в KB!")
-                                    st.info(f"**ID статьи:** `{result.get('article_id')}`")
-                                    
+                                    # Сохраняем статус успеха перед rerun
+                                    st.session_state.add_success_status = {
+                                        "message": "Статья успешно добавлена в KB!",
+                                        "article_id": result.get('article_id')
+                                    }
                                     # Очистка формы через rerun
                                     st.rerun()
                                 else:
@@ -918,9 +1466,11 @@ if st.session_state.get("use_parsed_document") and st.session_state.get("parsed_
                                         
                                         if response.status_code == 200:
                                             result = response.json()
-                                            st.success(f"✅ Статья успешно добавлена в KB!")
-                                            st.info(f"**ID статьи:** `{result.get('article_id')}`")
-                                            
+                                            # Сохраняем статус успеха перед rerun
+                                            st.session_state.add_success_status = {
+                                                "message": "Статья успешно добавлена в KB!",
+                                                "article_id": result.get('article_id')
+                                            }
                                             # Очистка session state
                                             del st.session_state.use_parsed_document
                                             del st.session_state.parsed_document

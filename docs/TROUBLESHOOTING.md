@@ -38,6 +38,55 @@ FastAPI сервер не запущен или недоступен на пор
 
 ---
 
+## ❌ Ошибка: LLM сервис недоступен
+
+**Симптомы:**
+```
+⚠️ LLM сервис недоступен
+[Errno 111] Connection refused
+```
+
+**Причина:**
+- Если используется Ollama - он не запущен
+- Если используется Gemini/OpenAI - не установлены API ключи
+
+**Решение:**
+
+### Если используете Ollama:
+
+1. **Запустите Ollama:**
+   ```bash
+   ollama serve
+   ```
+
+2. **Проверьте доступность:**
+   ```bash
+   curl http://localhost:11434/api/tags
+   ```
+
+3. **Убедитесь, что модель загружена:**
+   ```bash
+   ollama pull qwen3:8b
+   ```
+
+### Если используете Gemini/OpenAI:
+
+1. **Проверьте config.env:**
+   - Для Gemini: `GEMINI_API_KEY` должен быть установлен
+   - Для OpenAI: `OPENAI_API_KEY` должен быть установлен
+
+2. **Автоматический fallback:**
+   - Система автоматически переключается на доступный провайдер
+   - Если Ollama недоступен → пробует Gemini → OpenAI
+   - Порядок fallback настраивается в `backend/app/services/llm_client.py`
+
+3. **Измените провайдер в config.env:**
+   ```bash
+   LLM_PROVIDER=gemini  # или openai
+   ```
+
+---
+
 ## ❌ Ошибка: ModuleNotFoundError: No module named 'models'
 
 **Симптомы:**
@@ -155,5 +204,6 @@ streamlit run frontend/user_ui.py --server.port 8502
 - `README.md` - общая информация о проекте
 - `QUICK_START.md` - быстрый старт
 - `docs/STREAMLIT_INTERFACES_GUIDE.md` - руководство по интерфейсам
+
 
 

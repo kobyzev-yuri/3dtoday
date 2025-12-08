@@ -132,3 +132,4 @@ curl http://localhost:8000/api/kb/statistics
 - `docs/INTERFACES_ARCHITECTURE.md` - архитектура интерфейсов
 
 
+

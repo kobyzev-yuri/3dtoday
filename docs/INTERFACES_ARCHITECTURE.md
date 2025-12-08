@@ -288,3 +288,4 @@ Qdrant (KB)
 - FastAPI Backend - единый API для обоих типов интерфейсов
 
 
+
