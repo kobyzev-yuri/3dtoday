@@ -378,6 +378,7 @@ def test_url_upload(test_url: Optional[str] = None) -> Dict[str, Any]:
         
         # Тест 3.2: Парсинг через LLM (GPT-4o/Gemini)
         print_info("\n🤖 Тест 3.2: Парсинг URL через LLM")
+        print_info("💡 Примечание: LLM парсинг требует API ключи (GEMINI_API_KEY или OPENAI_API_KEY)")
         
         # Пробуем через Gemini (если доступен)
         llm_providers = ["gemini", "openai"]
@@ -385,7 +386,7 @@ def test_url_upload(test_url: Optional[str] = None) -> Dict[str, Any]:
         
         for provider in llm_providers:
             try:
-                print_info(f"Пробуем провайдер: {provider}")
+                print_info(f"\nПробуем провайдер: {provider}")
                 
                 with httpx.Client(timeout=TIMEOUT) as client:
                     response = client.post(
@@ -413,19 +414,47 @@ def test_url_upload(test_url: Optional[str] = None) -> Dict[str, Any]:
                             }
                             break
                         else:
-                            print_error(f"Парсинг через {provider} не удался: {result.get('error', 'Unknown error')}")
+                            error_msg = result.get('error', result.get('detail', 'Unknown error'))
+                            print_error(f"Парсинг через {provider} не удался: {error_msg}")
                     else:
-                        print_error(f"Ошибка парсинга через {provider}: {response.status_code}")
+                        # Пытаемся получить детали ошибки из ответа
+                        try:
+                            error_detail = response.json().get('detail', response.text)
+                        except:
+                            error_detail = response.text[:500] if len(response.text) > 500 else response.text
+                        
+                        print_error(f"Ошибка парсинга через {provider}: HTTP {response.status_code}")
+                        if error_detail:
+                            print_error(f"Детали: {error_detail}")
+                        
+                        # Проверяем, не связана ли ошибка с отсутствием API ключей
+                        error_lower = error_detail.lower() if isinstance(error_detail, str) else ""
+                        if "api_key" in error_lower or "api key" in error_lower or "не установлен" in error_lower:
+                            print_info(f"💡 Не установлен API ключ для {provider.upper()}")
+                            print_info(f"   Установите {provider.upper()}_API_KEY в config.env")
+                        elif "timeout" in error_lower or "timed out" in error_lower:
+                            print_info("💡 Превышено время ожидания - попробуйте увеличить таймаут")
+                        elif "connection" in error_lower or "connection refused" in error_lower:
+                            print_info("💡 Проблема с подключением к API провайдера")
+                        elif "valueerror" in error_lower or "неподдерживаемый провайдер" in error_lower:
+                            print_info("💡 Проблема с конфигурацией провайдера")
                         
             except httpx.TimeoutException:
                 print_error(f"Таймаут при парсинге через {provider}")
+                print_info("💡 Попробуйте увеличить таймаут или проверить доступность API")
                 continue
             except Exception as e:
                 print_error(f"Ошибка при парсинге через {provider}: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
         
         if not url_result_llm:
-            print_info("LLM парсинг недоступен (требуются API ключи или Ollama)")
+            print_info("\n⚠️ LLM парсинг недоступен")
+            print_info("💡 Для использования LLM парсинга:")
+            print_info("   1. Установите GEMINI_API_KEY или OPENAI_API_KEY в config.env")
+            print_info("   2. Убедитесь, что провайдер доступен")
+            print_info("   3. Обычный парсинг (без LLM) работает и этого достаточно для большинства случаев")
         
         return {
             "success": url_result_normal.get("success", False) or (url_result_llm and url_result_llm.get("success", False)),
