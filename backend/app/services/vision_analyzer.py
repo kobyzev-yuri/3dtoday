@@ -21,43 +21,93 @@ logger = logging.getLogger(__name__)
 
 class VisionAnalyzer:
     """
-    Анализатор изображений через Gemini Vision API
+    Анализатор изображений через Gemini Vision API или Ollama/llava
     Используется для анализа изображений из PDF и проверки их релевантности
+    Поддерживает fallback на llava если Gemini недоступен
     """
     
-    def __init__(self):
-        """Инициализация Vision Analyzer"""
+    def __init__(self, prefer_ollama: bool = False):
+        """
+        Инициализация Vision Analyzer
+        
+        Args:
+            prefer_ollama: Если True, предпочитает Ollama/llava вместо Gemini
+        """
         self.proxy_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("PROXYAPI_API_KEY") or os.getenv("OPENAI_API_KEY")
         self.gemini_base_url = os.getenv("GEMINI_BASE_URL", "https://api.proxyapi.ru/google")
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
-        self.use_gemini = bool(self.proxy_api_key)
+        self.use_gemini = bool(self.proxy_api_key) and not prefer_ollama
         
-        if not self.use_gemini:
-            logger.warning("⚠️ Gemini Vision API не настроен - требуется GEMINI_API_KEY или PROXYAPI_API_KEY")
+        # Настройки Ollama/llava
+        self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.ollama_vision_model = os.getenv("OLLAMA_VISION_MODEL", "llava")
+        self.ollama_timeout = int(os.getenv("OLLAMA_VISION_TIMEOUT", "300"))
+        self.use_ollama = prefer_ollama or not self.use_gemini
+        
+        if self.use_ollama:
+            logger.info(f"📷 Используется Ollama/llava для анализа изображений (модель: {self.ollama_vision_model})")
+        elif not self.use_gemini:
+            logger.warning("⚠️ Gemini Vision API не настроен - будет использован Ollama/llava если доступен")
     
     def check_availability(self) -> Dict[str, Any]:
-        """Проверка доступности Gemini Vision API"""
+        """Проверка доступности Vision API (Gemini или Ollama/llava)"""
+        if self.use_ollama:
+            # Проверяем доступность Ollama и llava
+            try:
+                response = httpx.get(f"{self.ollama_base_url}/api/tags", timeout=5)
+                if response.status_code == 200:
+                    models = response.json().get("models", [])
+                    llava_available = any(m.get("name", "").startswith("llava") for m in models)
+                    if llava_available:
+                        return {
+                            'available': True,
+                            'message': f'Ollama/llava доступен (модель: {self.ollama_vision_model})',
+                            'provider': 'ollama'
+                        }
+                    else:
+                        return {
+                            'available': False,
+                            'message': f'Модель llava не найдена в Ollama. Установите: ollama pull llava',
+                            'provider': 'ollama'
+                        }
+                else:
+                    return {
+                        'available': False,
+                        'message': f'Ollama недоступен (status: {response.status_code})',
+                        'provider': 'ollama'
+                    }
+            except Exception as e:
+                return {
+                    'available': False,
+                    'message': f'Ollama недоступен: {e}',
+                    'provider': 'ollama'
+                }
+        
+        # Проверяем Gemini
         if not self.use_gemini:
             return {
                 'available': False,
-                'message': 'Gemini Vision API не настроен - требуется GEMINI_API_KEY'
+                'message': 'Gemini Vision API не настроен - требуется GEMINI_API_KEY',
+                'provider': 'gemini'
             }
         
         try:
             # Простая проверка доступности API
             return {
                 'available': True,
-                'message': f'Google Gemini {self.gemini_model} доступен через ProxyAPI'
+                'message': f'Google Gemini {self.gemini_model} доступен через ProxyAPI',
+                'provider': 'gemini'
             }
         except Exception as e:
             return {
                 'available': False,
-                'message': f'Ошибка проверки доступности Gemini: {e}'
+                'message': f'Ошибка проверки доступности Gemini: {e}',
+                'provider': 'gemini'
             }
     
     def analyze_image(self, image_data: bytes, image_name: str = "image") -> Dict[str, Any]:
         """
-        Анализ изображения через Gemini Vision API
+        Анализ изображения через Gemini Vision API или Ollama/llava
         
         Args:
             image_data: Байты изображения
@@ -66,12 +116,15 @@ class VisionAnalyzer:
         Returns:
             Dict с результатами анализа
         """
+        # Используем Ollama/llava если предпочтительно или Gemini недоступен
+        if self.use_ollama:
+            return self._analyze_with_ollama(image_data, image_name)
+        
+        # Используем Gemini
         if not self.use_gemini:
-            return {
-                'success': False,
-                'error': 'Google Gemini не настроен - требуется GEMINI_API_KEY',
-                'provider': 'gemini'
-            }
+            # Fallback на Ollama если Gemini не настроен
+            logger.info("⚠️ Gemini не настроен, пробуем Ollama/llava")
+            return self._analyze_with_ollama(image_data, image_name)
         
         try:
             # Оптимизируем изображение для больших файлов
@@ -104,11 +157,9 @@ class VisionAnalyzer:
             return self._analyze_with_gemini(image_base64, image_name)
             
         except Exception as e:
-            logger.error(f"❌ Ошибка анализа изображения: {e}")
-            return {
-                'success': False,
-                'error': f'Ошибка анализа изображения: {e}'
-            }
+            logger.error(f"❌ Ошибка анализа изображения через Gemini: {e}, пробуем Ollama/llava")
+            # Fallback на Ollama
+            return self._analyze_with_ollama(image_data, image_name)
     
     def analyze_image_from_path(self, image_path: Path) -> Dict[str, Any]:
         """
@@ -340,4 +391,73 @@ class VisionAnalyzer:
                 'success': False,
                 'error': f'Ошибка анализа через Gemini: {e}',
                 'provider': 'gemini'
+            }
+    
+    def _analyze_with_ollama(self, image_data: bytes, image_name: str) -> Dict[str, Any]:
+        """
+        Анализ изображения с помощью Ollama/llava
+        
+        Args:
+            image_data: Байты изображения
+            image_name: Имя изображения для контекста
+        
+        Returns:
+            Dict с результатами анализа
+        """
+        try:
+            # Кодируем изображение в base64 для Ollama API
+            image_base64 = base64.b64encode(image_data).decode()
+            
+            # Промпт для анализа изображений из PDF документов о 3D-печати
+            prompt = f"""Проанализируй это изображение из документа '{image_name}' детально.
+
+Для изображений из PDF документов о 3D-печати:
+1. Опиши общую структуру и компоновку
+2. Извлеки весь видимый текст (сохрани форматирование)
+3. Определи тип контента (техническая схема, инструкция, пример проблемы, сравнение и т.д.)
+4. Выдели ключевые разделы, заголовки, таблицы
+5. Опиши схемы, диаграммы, графики если есть
+6. Укажи важные технические характеристики или данные
+7. Определи, связано ли изображение с 3D-печатью, принтерами, материалами или проблемами печати
+
+Ответь подробно на русском языке, сохраняя структуру документа."""
+            
+            payload = {
+                "model": self.ollama_vision_model,
+                "prompt": prompt,
+                "images": [image_base64],
+                "stream": False,
+                "options": {
+                    "temperature": 0.1
+                }
+            }
+            
+            response = httpx.post(
+                f"{self.ollama_base_url}/api/generate",
+                json=payload,
+                timeout=self.ollama_timeout
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                analysis_text = result.get('response', '')
+                
+                if analysis_text:
+                    return {
+                        'success': True,
+                        'analysis': analysis_text,
+                        'model': self.ollama_vision_model,
+                        'provider': 'ollama'
+                    }
+                else:
+                    raise Exception(f'Пустой ответ от Ollama: {result}')
+            else:
+                raise Exception(f'Ollama API error: {response.status_code} - {response.text}')
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка анализа через Ollama/llava: {e}")
+            return {
+                'success': False,
+                'error': f'Ошибка анализа через Ollama/llava: {e}',
+                'provider': 'ollama'
             }

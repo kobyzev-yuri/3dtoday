@@ -897,14 +897,20 @@ Abstract:"""
         try:
             # Импортируем VisionAnalyzer
             from app.services.vision_analyzer import VisionAnalyzer
-            vision_analyzer = VisionAnalyzer()
             
-            # Проверяем доступность Gemini Vision API
+            # Определяем, какой провайдер использовать для анализа изображений
+            # Если основной провайдер - ollama, предпочитаем llava
+            prefer_ollama = (self.llm_provider or os.getenv("LLM_PROVIDER", "")).lower() == "ollama"
+            vision_analyzer = VisionAnalyzer(prefer_ollama=prefer_ollama)
+            
+            # Проверяем доступность Vision API (Gemini или Ollama/llava)
             availability = vision_analyzer.check_availability()
             if not availability.get('available', False):
-                logger.warning(f"⚠️ Gemini Vision API недоступен: {availability.get('message', 'Unknown')}")
+                logger.warning(f"⚠️ Vision API недоступен ({availability.get('provider', 'unknown')}): {availability.get('message', 'Unknown')}")
                 # Fallback на анализ описаний
                 return await self._analyze_images_fallback(images)
+            
+            logger.info(f"📷 Используется {availability.get('provider', 'unknown')} для анализа изображений")
             
             # Анализируем каждое изображение через Gemini Vision API
             image_analyses = []
