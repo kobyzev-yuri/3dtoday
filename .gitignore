@@ -63,6 +63,14 @@ temp/
 *_test_result.json
 test_results/
 
+# Test data (images, PDFs - keep JSON examples)
+tools/test_data/*.jpg
+tools/test_data/*.jpeg
+tools/test_data/*.png
+tools/test_data/*.pdf
+!tools/test_data/*.json
+!tools/test_data/.gitkeep
+
 # OS
 .DS_Store
 Thumbs.db
