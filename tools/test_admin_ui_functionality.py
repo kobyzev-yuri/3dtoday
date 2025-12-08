@@ -254,8 +254,9 @@ def test_pdf_upload(pdf_path: Optional[str] = None) -> Dict[str, Any]:
                     json={
                         "source": pdf_path,
                         "source_type": "pdf",
-                        "llm_provider": "ollama",
-                        "timeout": 300
+                        "llm_provider": "gemini",  # Используем Gemini для PDF (лучше для анализа изображений)
+                        "timeout": 300,
+                        "max_pages": 30  # Ограничиваем до 30 страниц для теста
                     }
                 )
             else:

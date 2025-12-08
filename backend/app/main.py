@@ -215,8 +215,22 @@ async def parse_document(
         if not source:
             raise HTTPException(status_code=400, detail="source обязателен")
         
+        # Определяем source_type если не указан
+        if not source_type:
+            if source.lower().endswith('.pdf'):
+                source_type = "pdf"
+            elif source.startswith('http://') or source.startswith('https://'):
+                source_type = "url"
+            else:
+                source_type = "json"  # По умолчанию
+        
+        # Для PDF по умолчанию используем Gemini (лучше работает с изображениями)
+        if not llm_provider and source_type == "pdf":
+            llm_provider = "gemini"
+            logger.info(f"📄 Для PDF используется Gemini по умолчанию (лучше для анализа изображений)")
+        
         # Для Gemini по умолчанию ограничиваем PDF до 30 страниц
-        if max_pages is None and llm_provider == "gemini" and (source_type == "pdf" or (source_type is None and source.lower().endswith('.pdf'))):
+        if max_pages is None and llm_provider == "gemini" and source_type == "pdf":
             max_pages = 30
             logger.info(f"📄 Ограничение PDF до {max_pages} страниц для Gemini")
         
