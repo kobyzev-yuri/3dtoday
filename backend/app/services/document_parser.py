@@ -197,18 +197,62 @@ class DocumentParser:
                 if pages_to_parse < total_pages:
                     logger.info(f"📄 Ограничение парсинга PDF: {pages_to_parse} из {total_pages} страниц")
             
-            # Извлечение текста
+            # Извлечение текста и изображений
             content_parts = []
+            images = []
+            import base64
+            import tempfile
+            import os
+            
             for page_num in range(pages_to_parse):
                 page = pdf_reader.pages[page_num]
                 text = page.extract_text()
                 if text:
                     content_parts.append(text)
+                
+                # Извлечение изображений со страницы
+                try:
+                    if hasattr(page, 'images') and page.images:
+                        for img_num, image_file_object in enumerate(page.images):
+                            try:
+                                # Получаем данные изображения
+                                image_data = image_file_object.data
+                                
+                                # Определяем расширение файла
+                                ext = image_file_object.name.split('.')[-1] if '.' in image_file_object.name else 'jpg'
+                                if ext not in ['jpg', 'jpeg', 'png', 'gif']:
+                                    ext = 'jpg'  # По умолчанию jpg
+                                
+                                # Создаем base64 представление для передачи через API
+                                image_base64 = base64.b64encode(image_data).decode('utf-8')
+                                image_data_url = f"data:image/{ext};base64,{image_base64[:100]}..."  # Обрезаем для логов
+                                
+                                images.append({
+                                    "url": f"pdf_image_page_{page_num + 1}_img_{img_num + 1}.{ext}",
+                                    "alt": f"Изображение со страницы {page_num + 1}",
+                                    "title": image_file_object.name if hasattr(image_file_object, 'name') else f"Image {img_num + 1}",
+                                    "description": f"Изображение {img_num + 1} со страницы {page_num + 1} PDF документа",
+                                    "data": image_base64,  # Base64 данные изображения
+                                    "mime_type": f"image/{ext}",
+                                    "page": page_num + 1,
+                                    "image_index": img_num + 1
+                                })
+                                
+                                logger.debug(f"📷 Извлечено изображение: страница {page_num + 1}, изображение {img_num + 1}, размер {len(image_data)} байт")
+                            except Exception as img_error:
+                                logger.warning(f"⚠️ Ошибка при извлечении изображения со страницы {page_num + 1}: {img_error}")
+                except Exception as e:
+                    logger.debug(f"⚠️ Страница {page_num + 1} не содержит изображений или ошибка доступа: {e}")
             
             content = "\n\n".join(content_parts)
             
             if pages_to_parse < total_pages:
                 content += f"\n\n[Примечание: документ содержит {total_pages} страниц, обработано {pages_to_parse}]"
+            
+            if images:
+                logger.info(f"✅ Извлечено изображений из PDF: {len(images)}")
+            else:
+                logger.info("ℹ️ Изображения в PDF не найдены")
             
             # Извлечение метаданных (безопасная обработка IndirectObject)
             metadata = {}
@@ -251,11 +295,12 @@ class DocumentParser:
                 "date": safe_get_metadata("/CreationDate", ""),
                 "author": safe_get_metadata("/Author"),
                 "tags": [],
-                "images": [],  # PDF изображения требуют отдельной обработки
+                "images": images,  # Извлеченные изображения из PDF
                 "content_type": "documentation",  # PDF обычно документация
                 "metadata": {
                     "pages": total_pages,
                     "pages_parsed": pages_to_parse,
+                    "images_count": len(images),
                     "pdf_metadata": metadata
                 }
             }
