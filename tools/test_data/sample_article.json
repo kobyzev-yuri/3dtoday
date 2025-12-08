@@ -1,0 +1,31 @@
+{
+  "title": "Как устранить stringing (сопли) при печати PLA",
+  "content": "Stringing (сопли) - это проблема, когда между деталями появляются тонкие ниточки пластика.\n\nПричины:\n- Слишком высокая температура сопла\n- Недостаточная retraction\n- Слишком медленная скорость retraction\n\nРешения:\n1. Уменьшите температуру сопла на 5-10°C\n2. Увеличьте retraction до 6-8 мм\n3. Увеличьте скорость retraction до 45-60 мм/с\n4. Включите функцию \"Wipe\" в настройках слайсера\n\nЭти настройки подходят для большинства принтеров с прямым экструдером (Ender-3, Prusa i3).",
+  "url": "https://3dtoday.ru/blogs/test/stringing-pla",
+  "section": "Техничка",
+  "date": "2024-01-15",
+  "problem_type": "stringing",
+  "printer_models": ["Ender-3", "Prusa i3"],
+  "materials": ["PLA"],
+  "symptoms": ["ниточки между деталями", "сопли", "паутина"],
+  "solutions": [
+    {
+      "parameter": "retraction_length",
+      "value": 6,
+      "unit": "mm",
+      "description": "Увеличьте retraction до 6 мм"
+    },
+    {
+      "parameter": "retraction_speed",
+      "value": 45,
+      "unit": "mm/s",
+      "description": "Скорость retraction 45 мм/с"
+    },
+    {
+      "parameter": "nozzle_temperature",
+      "value": -5,
+      "unit": "°C",
+      "description": "Уменьшите температуру сопла на 5°C"
+    }
+  ]
+}
