@@ -160,7 +160,7 @@ def test_json_upload(json_path: Optional[str] = None) -> Dict[str, Any]:
                 json={
                     "source": json_string,
                     "source_type": "json",
-                    "llm_provider": "ollama",  # Используем ollama для быстрого теста
+                    "llm_provider": "gemini",  # Используем gemini вместо ollama (ollama может быть недоступен)
                     "timeout": 300
                 }
             )
