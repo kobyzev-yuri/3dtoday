@@ -272,7 +272,7 @@ for problem in problems:
 
 ### Скрипт для проверки статистики
 
-Создайте файл `scripts/check_kb_stats.py`:
+Создайте файл `tools/check_kb_stats.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -308,7 +308,7 @@ if __name__ == "__main__":
 
 **Использование:**
 ```bash
-python3 scripts/check_kb_stats.py
+python3 tools/check_kb_stats.py
 ```
 
 ---

@@ -256,7 +256,7 @@ result = await analyzer.analyze_url("https://3dtoday.ru/...")
 ### Через тестовый скрипт
 
 ```bash
-python scripts/test_gemini3_kb_formation.py "https://3dtoday.ru/..."
+python tools/test_gemini3_kb_formation.py "https://3dtoday.ru/..."
 ```
 
 ### Через Admin UI
@@ -298,7 +298,7 @@ python scripts/test_gemini3_kb_formation.py "https://3dtoday.ru/..."
 - `backend/app/services/llm_url_analyzer.py` - основной код анализатора
 - `backend/app/main.py` - API endpoint `/api/kb/articles/parse_with_llm`
 - `frontend/admin_ui.py` - UI для тестирования
-- `scripts/test_gemini3_kb_formation.py` - тестовый скрипт
+- `tools/test_gemini3_kb_formation.py` - тестовый скрипт
 - `config.env` - конфигурация
 
 ---
