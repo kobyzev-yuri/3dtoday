@@ -246,23 +246,36 @@ async def parse_document(
         from services.document_parser import DocumentParser
         from agents.kb_librarian import KBLibrarianAgent
         
+        logger.info(f"📥 Начало парсинга документа: source_type={source_type}, llm_provider={llm_provider}, max_pages={max_pages}")
+        
         parser = DocumentParser()
         doc_data = await parser.parse_document(source, source_type, max_pages=max_pages)
         
         if not doc_data:
+            logger.error(f"❌ Не удалось распарсить документ: {source[:100]}")
             raise HTTPException(status_code=404, detail="Не удалось распарсить документ")
+        
+        logger.info(f"✅ Документ распарсен: title={doc_data.get('title', 'N/A')[:50]}, content_length={len(doc_data.get('content', ''))}")
         
         # Полный цикл: анализ + решение о публикации через агента-библиотекаря
         # Передаем провайдер и модель в агента для правильной инициализации
-        librarian = KBLibrarianAgent(llm_provider=llm_provider, model=model, timeout=timeout)
-        review_result = await librarian.review_and_decide(
-            title=doc_data["title"],
-            content=doc_data["content"],
-            images=doc_data.get("images", []),
-            url=doc_data.get("url"),
-            content_type=doc_data.get("content_type"),
-            is_questions_list=doc_data.get("is_questions_list", False)
-        )
+        logger.info(f"🤖 Инициализация агента-библиотекаря: llm_provider={llm_provider}, model={model}, timeout={timeout}")
+        
+        try:
+            librarian = KBLibrarianAgent(llm_provider=llm_provider, model=model, timeout=timeout)
+            logger.info(f"📋 Начало анализа через агента-библиотекаря...")
+            review_result = await librarian.review_and_decide(
+                title=doc_data["title"],
+                content=doc_data["content"],
+                images=doc_data.get("images", []),
+                url=doc_data.get("url"),
+                content_type=doc_data.get("content_type"),
+                is_questions_list=doc_data.get("is_questions_list", False)
+            )
+            logger.info(f"✅ Анализ завершен: relevance_score={review_result.get('relevance_score', 'N/A')}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при анализе через агента-библиотекаря: {e}", exc_info=True)
+            raise
         
         # Восстанавливаем оригинальные настройки
         if original_provider:
