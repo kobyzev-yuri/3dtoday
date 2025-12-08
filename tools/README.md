@@ -83,6 +83,40 @@ python3 tools/view_article.py stringing_pla_ender3
 - Запущенный FastAPI сервер (`http://localhost:8000`)
 - Настроенный `config.env` с API ключами (если используются внешние LLM)
 
+#### `test_user_ui_functionality.py`
+Тесты функционала пользовательского интерфейса (техподдержка).
+
+**Использование:**
+```bash
+# Запустить все тесты
+python3 tools/test_user_ui_functionality.py
+
+# Только реалистичный сценарий
+python3 tools/test_user_ui_functionality.py --scenario
+
+# Тест сохранения контекста
+python3 tools/test_user_ui_functionality.py --context
+
+# Тест потока уточнений
+python3 tools/test_user_ui_functionality.py --clarification
+```
+
+**Что проверяет:**
+- ✅ Реалистичный сценарий диалога с пользователем
+- ✅ Уточняющие вопросы и ответы на них
+- ✅ Сохранение контекста между запросами
+- ✅ Загрузку изображений дефектов (если реализовано)
+- ✅ Работу с историей диалога
+
+**Примеры:**
+```bash
+# Полный тест с реалистичным сценарием
+python3 tools/test_user_ui_functionality.py --scenario
+
+# Комбинация тестов
+python3 tools/test_user_ui_functionality.py --scenario --context
+```
+
 #### `test_admin_ui_functionality.py`
 Комплексные тесты функционала веб-интерфейса администрирования KB.
 
