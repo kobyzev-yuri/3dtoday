@@ -120,9 +120,11 @@ class LLMClient:
             if not self._check_ollama_available():
                 raise ConnectionError(f"Ollama недоступен по адресу {self.ollama_url}")
             
+            # Создаем клиент без таймаута по умолчанию, 
+            # таймаут будет передаваться в каждый запрос
             self.client = httpx.AsyncClient(
                 base_url=self.ollama_url,
-                timeout=self.timeout
+                timeout=None  # Таймаут будет задаваться в каждом запросе
             )
             
             logger.info(f"✅ Ollama клиент инициализирован (model={self.model}, url={self.ollama_url})")
@@ -175,9 +177,10 @@ class LLMClient:
             self.base_url = base_url.rstrip('/')
             
             # Создаем HTTP клиент для ProxyAPI
+            # Таймаут будет передаваться в каждый запрос
             self.client = httpx.AsyncClient(
                 base_url=self.base_url,
-                timeout=self.timeout,
+                timeout=None,  # Таймаут будет задаваться в каждом запросе
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
@@ -210,7 +213,8 @@ class LLMClient:
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None
     ) -> str:
         """
         Генерация текста через LLM
@@ -220,16 +224,17 @@ class LLMClient:
             system_prompt: Системный промпт (опционально)
             temperature: Температура генерации (опционально)
             max_tokens: Максимальное количество токенов (опционально)
+            timeout: Таймаут запроса в секундах (опционально, переопределяет значение по умолчанию)
         
         Returns:
             Сгенерированный текст
         """
         if self.provider == "ollama":
-            return await self._generate_ollama(prompt, system_prompt, temperature, max_tokens)
+            return await self._generate_ollama(prompt, system_prompt, temperature, max_tokens, timeout)
         elif self.provider == "openai":
-            return await self._generate_openai(prompt, system_prompt, temperature, max_tokens)
+            return await self._generate_openai(prompt, system_prompt, temperature, max_tokens, timeout)
         elif self.provider == "gemini":
-            return await self._generate_gemini(prompt, system_prompt, temperature, max_tokens)
+            return await self._generate_gemini(prompt, system_prompt, temperature, max_tokens, timeout)
         else:
             raise ValueError(f"Неизвестный провайдер: {self.provider}")
     
@@ -238,9 +243,12 @@ class LLMClient:
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None
     ) -> str:
         """Генерация через Ollama"""
+        # Используем переданный таймаут или значение по умолчанию
+        request_timeout = timeout if timeout is not None else self.timeout
         try:
             # Пробуем сначала /api/chat (новый API)
             try:
@@ -261,8 +269,8 @@ class LLMClient:
                 if max_tokens:
                     payload["options"]["num_predict"] = max_tokens
                 
-                logger.debug(f"📤 Ollama запрос к /api/chat: model={self.model}")
-                response = await self.client.post("/api/chat", json=payload)
+                logger.debug(f"📤 Ollama запрос к /api/chat: model={self.model}, timeout={request_timeout}s")
+                response = await self.client.post("/api/chat", json=payload, timeout=request_timeout)
                 response.raise_for_status()
                 
                 result = response.json()
@@ -295,8 +303,8 @@ class LLMClient:
             if max_tokens:
                 payload["options"]["num_predict"] = max_tokens
             
-            logger.debug(f"📤 Ollama запрос к /api/generate: model={self.model}")
-            response = await self.client.post("/api/generate", json=payload)
+            logger.debug(f"📤 Ollama запрос к /api/generate: model={self.model}, timeout={request_timeout}s")
+            response = await self.client.post("/api/generate", json=payload, timeout=request_timeout)
             response.raise_for_status()
             
             result = response.json()
@@ -304,6 +312,9 @@ class LLMClient:
             logger.debug(f"✅ Ollama ответ получен через /api/generate ({len(content)} символов)")
             return content
             
+        except httpx.TimeoutException as e:
+            logger.error(f"⏱️ Таймаут запроса к Ollama (timeout={request_timeout}s): {e}")
+            raise ConnectionError(f"Ollama не ответил в течение {request_timeout} секунд. Модель {self.model} может быть слишком медленной или сервер перегружен.")
         except httpx.HTTPStatusError as e:
             logger.error(f"❌ HTTP ошибка Ollama: {e.response.status_code} - {e.response.text[:200]}")
             raise
@@ -316,9 +327,12 @@ class LLMClient:
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None
     ) -> str:
         """Генерация через OpenAI/ProxyAPI"""
+        # Используем переданный таймаут или значение по умолчанию
+        request_timeout = timeout if timeout is not None else self.timeout
         try:
             messages = []
             
@@ -327,7 +341,7 @@ class LLMClient:
             
             messages.append({"role": "user", "content": prompt})
             
-            logger.debug(f"📤 OpenAI запрос: model={self.model}, timeout={self.timeout}s, prompt_len={len(prompt)}")
+            logger.debug(f"📤 OpenAI запрос: model={self.model}, timeout={request_timeout}s, prompt_len={len(prompt)}")
             
             # Передаем timeout в метод create() как в sql4A
             response = self.client.chat.completions.create(
@@ -335,7 +349,7 @@ class LLMClient:
                 messages=messages,
                 temperature=temperature or self.temperature,
                 max_tokens=max_tokens or 2000,  # Ограничиваем max_tokens для ускорения
-                timeout=self.timeout  # Явно передаем timeout в запрос
+                timeout=request_timeout  # Явно передаем timeout в запрос
             )
             
             content = response.choices[0].message.content
@@ -351,9 +365,12 @@ class LLMClient:
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None
     ) -> str:
         """Генерация через Gemini/ProxyAPI через REST API"""
+        # Используем переданный таймаут или значение по умолчанию
+        request_timeout = timeout if timeout is not None else self.timeout
         try:
             # Формируем содержимое запроса
             parts = [{"text": prompt}]
@@ -380,11 +397,12 @@ class LLMClient:
             # Формат модели: gemini-3-pro-preview -> models/gemini-3-pro-preview:generateContent
             model_endpoint = f"/v1beta/models/{self.model}:generateContent"
             
-            logger.debug(f"📤 Gemini запрос к ProxyAPI: {self.base_url}{model_endpoint}")
+            logger.debug(f"📤 Gemini запрос к ProxyAPI: {self.base_url}{model_endpoint}, timeout={request_timeout}s")
             
             response = await self.client.post(
                 model_endpoint,
-                json=request_data
+                json=request_data,
+                timeout=request_timeout
             )
             response.raise_for_status()
             

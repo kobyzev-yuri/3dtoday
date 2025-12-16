@@ -4,6 +4,9 @@ FastAPI приложение для проекта 3dtoday
 
 import os
 import logging
+import base64
+import httpx as httpx_client
+import tempfile
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, UploadFile, File, Body
@@ -539,21 +542,114 @@ async def add_article_from_parse(request: Dict[str, Any] = Body(...)):
         if result["success"]:
             # Индексация изображений, если есть
             images = parsed_document.get("images", [])
+            indexed_images = []
             if images:
-                for img_url in images[:5]:  # Ограничиваем количество изображений
-                    try:
-                        if isinstance(img_url, dict):
-                            img_url_str = img_url.get("url", "")
-                        else:
-                            img_url_str = str(img_url)
-                        if img_url_str:
-                            await indexer.index_image(
-                                image_url=img_url_str,
-                                article_id=article_id,
-                                title=title
-                            )
-                    except Exception as e:
-                        logger.warning(f"Не удалось добавить изображение {img_url}: {e}")
+                from app.services.vision_analyzer import VisionAnalyzer
+                from app.agents.kb_librarian import KBLibrarianAgent
+                
+                # Используем VisionAnalyzer для анализа изображений
+                vision_analyzer = VisionAnalyzer(prefer_ollama=False)
+                availability = vision_analyzer.check_availability()
+                
+                if availability.get('available', False):
+                    logger.info(f"📷 Анализ изображений через {availability.get('provider', 'unknown')}")
+                    
+                    # Обрабатываем до 20 изображений (увеличили лимит)
+                    for img_idx, img_data in enumerate(images[:20]):
+                        try:
+                            if isinstance(img_data, dict):
+                                img_url = img_data.get("url", "")
+                                img_title = img_data.get("title", img_data.get("alt", f"Image {img_idx + 1}"))
+                                img_base64 = img_data.get("data")  # Base64 данные, если есть
+                            else:
+                                img_url = str(img_data)
+                                img_title = f"Image {img_idx + 1}"
+                                img_base64 = None
+                            
+                            if not img_url and not img_base64:
+                                continue
+                            
+                            # Анализ изображения через Vision API
+                            try:
+                                if img_base64:
+                                    # Если есть base64 данные (из PDF)
+                                    analysis_result = vision_analyzer.analyze_image_from_base64(img_base64, img_title)
+                                elif img_url.startswith('http'):
+                                    # Если это URL - скачиваем и анализируем
+                                    analysis_result = vision_analyzer.analyze_image_from_url(img_url, img_title)
+                                else:
+                                    # Локальный файл
+                                    analysis_result = vision_analyzer.analyze_image_from_path(Path(img_url))
+                                
+                                # Проверяем успешность анализа и релевантность
+                                if analysis_result and analysis_result.get("success", False):
+                                    # Получаем текст анализа
+                                    analysis_text = analysis_result.get("analysis", "")
+                                    
+                                    # Проверяем релевантность изображения к 3D-печати
+                                    relevance_check = vision_analyzer.check_relevance_to_3d_printing(analysis_text, img_title)
+                                    
+                                    if not relevance_check.get("success", False) or not relevance_check.get("is_relevant", True):
+                                        logger.info(f"⚠️ Изображение {img_idx + 1} не релевантно 3D-печати, пропускаем")
+                                        continue
+                                    
+                                    # Создаем метаданные для индексации
+                                    image_metadata = {
+                                        "article_id": f"{article_id}_img_{img_idx + 1}",
+                                        "title": img_title,
+                                        "content": analysis_text,  # Используем полный анализ как content
+                                        "abstract": analysis_text[:500] if len(analysis_text) > 500 else analysis_text,  # Краткий абстракт
+                                        "problem_type": relevance_check.get("problem_type") or (summary.get("problem_type") if summary else None),
+                                        "printer_models": relevance_check.get("printer_models", []) or (summary.get("printer_models", []) if summary else []),
+                                        "materials": relevance_check.get("materials", []) or (summary.get("materials", []) if summary else []),
+                                        "symptoms": summary.get("symptoms", []) if summary else []
+                                    }
+                                    
+                                    # Скачиваем изображение во временный файл для индексации
+                                    import tempfile
+                                    import httpx as httpx_client
+                                    
+                                    temp_dir = Path(tempfile.gettempdir()) / "kb_images"
+                                    temp_dir.mkdir(exist_ok=True)
+                                    
+                                    if img_base64:
+                                        # Сохраняем base64 изображение
+                                        image_bytes = base64.b64decode(img_base64)
+                                        temp_path = temp_dir / f"{article_id}_img_{img_idx + 1}.jpg"
+                                        with open(temp_path, 'wb') as f:
+                                            f.write(image_bytes)
+                                    elif img_url.startswith('http'):
+                                        # Скачиваем изображение по URL
+                                        async with httpx_client.AsyncClient(timeout=30) as client:
+                                            img_response = await client.get(img_url)
+                                            img_response.raise_for_status()
+                                            temp_path = temp_dir / f"{article_id}_img_{img_idx + 1}.jpg"
+                                            with open(temp_path, 'wb') as f:
+                                                f.write(img_response.content)
+                                    else:
+                                        temp_path = Path(img_url)
+                                    
+                                    # Индексация изображения
+                                    index_result = await indexer.index_image(
+                                        image_data=image_metadata,
+                                        image_path=str(temp_path),
+                                        generate_embedding=True
+                                    )
+                                    
+                                    if index_result.get("success"):
+                                        indexed_images.append({
+                                            "image_id": image_metadata["article_id"],
+                                            "abstract": image_metadata.get("abstract", "")
+                                        })
+                                        logger.info(f"✅ Изображение {img_idx + 1} проанализировано и проиндексировано")
+                                    
+                            except Exception as img_error:
+                                logger.warning(f"⚠️ Ошибка анализа изображения {img_idx + 1}: {img_error}")
+                                
+                        except Exception as e:
+                            logger.warning(f"⚠️ Не удалось обработать изображение {img_idx + 1}: {e}")
+                else:
+                    logger.warning(f"⚠️ Vision API недоступен ({availability.get('message', 'unknown')}), изображения не будут проанализированы")
             
             return {
                 "success": True,
@@ -840,6 +936,297 @@ async def list_articles(limit: int = 10, offset: int = 0):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/kb/metadata/unique-values", response_class=UnicodeJSONResponse)
+async def get_unique_metadata_values():
+    """
+    Получение уникальных значений материалов и принтеров из KB
+    
+    Returns:
+        {
+            "materials": ["PLA", "PETG", "ABS", ...],
+            "printer_models": ["Ender-3", "Anycubic Kobra", ...]
+        }
+    """
+    try:
+        from services.vector_db import get_vector_db
+        
+        db = get_vector_db()
+        
+        # Получаем все точки через scroll (с большим лимитом)
+        materials_set = set()
+        printer_models_set = set()
+        
+        # Используем scroll для получения всех точек
+        limit = 10000  # Большой лимит для получения всех статей
+        offset = 0
+        
+        while True:
+            result = db.client.scroll(
+                collection_name=db.collection_name,
+                limit=limit,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            points = result[0]
+            if not points:
+                break
+            
+            # Собираем уникальные значения
+            for point in points:
+                payload = point.payload or {}
+                
+                # Материалы
+                materials = payload.get("materials", [])
+                if isinstance(materials, list):
+                    for material in materials:
+                        if material and isinstance(material, str):
+                            materials_set.add(material.strip())
+                
+                # Модели принтеров
+                printer_models = payload.get("printer_models", [])
+                if isinstance(printer_models, list):
+                    for printer_model in printer_models:
+                        if printer_model and isinstance(printer_model, str):
+                            printer_models_set.add(printer_model.strip())
+            
+            # Если получили меньше, чем лимит, значит это последняя страница
+            if len(points) < limit:
+                break
+            
+            offset += limit
+        
+        # Сортируем для удобства
+        materials_list = sorted(list(materials_set), key=str.lower)
+        printer_models_list = sorted(list(printer_models_set), key=str.lower)
+        
+        logger.info(f"✅ Найдено уникальных материалов: {len(materials_list)}, принтеров: {len(printer_models_list)}")
+        
+        return {
+            "materials": materials_list,
+            "printer_models": printer_models_list
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения уникальных значений метаданных: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/kb/examples/relevant", response_class=UnicodeJSONResponse)
+async def get_relevant_examples(
+    candidate_queries: Optional[str] = None,
+    limit: int = 8,
+    min_score: float = 0.3
+):
+    """
+    Получение релевантных примеров запросов из KB
+    
+    Args:
+        candidate_queries: Список кандидатов через запятую (опционально, для проверки)
+        limit: Максимальное количество примеров (по умолчанию 8)
+        min_score: Минимальный score релевантности (по умолчанию 0.3)
+    
+    Returns:
+        {
+            "examples": [
+                {
+                    "query": "У меня появляются ниточки...",
+                    "score": 0.85,
+                    "has_relevant_articles": true
+                }
+            ]
+        }
+    """
+    try:
+        from services.rag_service import get_rag_service
+        
+        rag_service = get_rag_service()
+        relevant_examples = []
+        
+        # Если переданы кандидаты, проверяем их релевантность
+        if candidate_queries:
+            candidates = [q.strip() for q in candidate_queries.split(",") if q.strip()]
+            logger.info(f"Checking {len(candidates)} candidate queries for relevance")
+            
+            for query in candidates:
+                try:
+                    # Быстрый поиск в KB для проверки релевантности
+                    results = await rag_service.hybrid_search(
+                        query=query,
+                        limit=1,  # Достаточно одного результата для проверки
+                        boost_filters=False
+                    )
+                    
+                    if results and len(results) > 0:
+                        score = results[0].get("score", 0.0)
+                        if score >= min_score:
+                            relevant_examples.append({
+                                "query": query,
+                                "score": round(score, 2),
+                                "has_relevant_articles": True
+                            })
+                            logger.debug(f"Query '{query[:50]}...' is relevant (score: {score:.2f})")
+                        else:
+                            logger.debug(f"Query '{query[:50]}...' has low relevance (score: {score:.2f})")
+                    else:
+                        logger.debug(f"Query '{query[:50]}...' has no results in KB")
+                except Exception as e:
+                    logger.warning(f"Error checking query '{query[:50]}...': {e}")
+                    continue
+        
+        # Если кандидаты не переданы или их недостаточно, генерируем примеры из KB
+        if len(relevant_examples) < limit:
+            logger.info("Generating examples from KB articles")
+            
+            # Получаем статьи из KB
+            from services.vector_db import get_vector_db
+            db = get_vector_db()
+            
+            # Получаем разнообразные статьи
+            result = db.client.scroll(
+                collection_name=db.collection_name,
+                limit=min(limit * 3, 100),  # Берем больше, чтобы выбрать разнообразные
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            points = result[0]
+            seen_queries = {ex["query"] for ex in relevant_examples}
+            
+            # Генерируем примеры из заголовков и метаданных статей
+            for point in points:
+                if len(relevant_examples) >= limit:
+                    break
+                
+                payload = point.payload or {}
+                title = payload.get("title", "")
+                problem_type = payload.get("problem_type", "")
+                materials = payload.get("materials", [])
+                printer_models = payload.get("printer_models", [])
+                
+                # Создаем примеры на основе статьи
+                examples_from_article = []
+                
+                # Пример 1: На основе заголовка (естественный запрос)
+                if title:
+                    # Преобразуем заголовок в естественный запрос пользователя
+                    title_lower = title.lower()
+                    
+                    # Если заголовок уже похож на вопрос, используем его как есть
+                    if any(word in title_lower for word in ["как", "почему", "что", "ищу", "помогите", "проблема"]):
+                        query = title
+                    # Если заголовок описывает проблему, преобразуем в запрос
+                    elif problem_type:
+                        # Используем более естественные формулировки
+                        problem_names = {
+                            "stringing": "ниточки между деталями",
+                            "warping": "отслоение от стола",
+                            "layer_separation": "трещины в слоях",
+                            "bed_adhesion": "плохое прилипание к столу",
+                            "overhang": "проблемы с нависающими частями",
+                            "underextrusion": "недозаполнение",
+                            "overextrusion": "перезаполнение"
+                        }
+                        problem_name = problem_names.get(problem_type, problem_type)
+                        
+                        if materials and printer_models:
+                            query = f"У меня появляются {problem_name} при печати {materials[0]} на {printer_models[0]}"
+                        elif materials:
+                            query = f"У меня появляются {problem_name} при печати {materials[0]}"
+                        else:
+                            query = f"Проблема с {problem_name}"
+                    else:
+                        # Общий запрос на основе заголовка
+                        query = f"Ищу информацию о {title.lower()}"
+                    
+                    if query not in seen_queries and len(query) > 10:
+                        examples_from_article.append(query)
+                
+                # Пример 2: На основе метаданных (конкретный запрос)
+                if materials and printer_models and problem_type:
+                    material = materials[0]
+                    printer = printer_models[0]
+                    
+                    problem_names = {
+                        "stringing": "ниточки между деталями",
+                        "warping": "отслаивается от стола",
+                        "layer_separation": "трещины в слоях",
+                        "bed_adhesion": "не прилипает к столу",
+                        "overhang": "плохое качество нависающих частей",
+                        "underextrusion": "недозаполнение",
+                        "overextrusion": "перезаполнение"
+                    }
+                    problem_name = problem_names.get(problem_type, problem_type)
+                    
+                    query = f"Печать {problem_name} при печати {material} на {printer}"
+                    
+                    if query not in seen_queries:
+                        examples_from_article.append(query)
+                
+                # Пример 3: Простой запрос о проблеме
+                if problem_type and problem_type not in [ex.get("query", "") for ex in relevant_examples]:
+                    problem_names = {
+                        "stringing": "stringing",
+                        "warping": "warping",
+                        "layer_separation": "трещины в слоях",
+                        "bed_adhesion": "прилипание к столу",
+                        "overhang": "нависающие части",
+                        "underextrusion": "недозаполнение",
+                        "overextrusion": "перезаполнение"
+                    }
+                    problem_name = problem_names.get(problem_type, problem_type)
+                    query = f"Как настроить параметры для решения проблемы {problem_name}?"
+                    
+                    if query not in seen_queries:
+                        examples_from_article.append(query)
+                
+                # Добавляем примеры (быстрая проверка релевантности)
+                for query in examples_from_article:
+                    if len(relevant_examples) >= limit:
+                        break
+                    
+                    # Быстрая проверка релевантности для сгенерированных примеров
+                    try:
+                        results = await rag_service.hybrid_search(
+                            query=query,
+                            limit=1,
+                            boost_filters=False
+                        )
+                        
+                        if results and len(results) > 0:
+                            score = results[0].get("score", 0.0)
+                            if score >= min_score:
+                                seen_queries.add(query)
+                                relevant_examples.append({
+                                    "query": query,
+                                    "score": round(score, 2),
+                                    "has_relevant_articles": True
+                                })
+                    except Exception as e:
+                        logger.debug(f"Error checking generated query '{query[:50]}...': {e}")
+                        # Все равно добавляем, так как он из KB
+                        seen_queries.add(query)
+                        relevant_examples.append({
+                            "query": query,
+                            "score": 0.8,  # Средний score для примеров из KB
+                            "has_relevant_articles": True
+                        })
+        
+        # Ограничиваем количество и сортируем по score
+        relevant_examples = sorted(relevant_examples, key=lambda x: x["score"], reverse=True)[:limit]
+        
+        logger.info(f"✅ Generated {len(relevant_examples)} relevant examples")
+        
+        return {
+            "examples": relevant_examples
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения релевантных примеров: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ========== ENDPOINTS ДЛЯ ПОЛЬЗОВАТЕЛЕЙ ==========
 
 @app.post("/api/diagnose", response_model=DiagnosticResponse)
@@ -852,7 +1239,77 @@ async def diagnose_problem(request: DiagnosticRequest):
             raise HTTPException(status_code=503, detail="Сервисы не инициализированы")
         
         rag_service = get_rag_service()
-        llm_client = get_llm_client()
+        
+        # Используем выбранную модель, если указана
+        if request.llm_provider and request.llm_model:
+            # Временно изменяем переменные окружения для использования выбранной модели
+            import os
+            original_provider = os.environ.get("LLM_PROVIDER")
+            original_model = None
+            model_env_key = None
+            
+            # Сохраняем оригинальные значения и устанавливаем новые
+            original_timeout = None
+            timeout_env_key = None
+            
+            if request.llm_provider == "openai":
+                original_model = os.environ.get("OPENAI_MODEL")
+                model_env_key = "OPENAI_MODEL"
+                timeout_env_key = "OPENAI_TIMEOUT"
+                original_timeout = os.environ.get("OPENAI_TIMEOUT")
+                os.environ["LLM_PROVIDER"] = "openai"
+                os.environ["OPENAI_MODEL"] = request.llm_model
+                if request.llm_timeout:
+                    os.environ["OPENAI_TIMEOUT"] = str(request.llm_timeout)
+            elif request.llm_provider == "ollama":
+                original_model = os.environ.get("OLLAMA_MODEL")
+                model_env_key = "OLLAMA_MODEL"
+                timeout_env_key = "OLLAMA_TIMEOUT"
+                original_timeout = os.environ.get("OLLAMA_TIMEOUT")
+                os.environ["LLM_PROVIDER"] = "ollama"
+                os.environ["OLLAMA_MODEL"] = request.llm_model
+                if request.llm_timeout:
+                    os.environ["OLLAMA_TIMEOUT"] = str(request.llm_timeout)
+            elif request.llm_provider == "gemini":
+                original_model = os.environ.get("GEMINI_MODEL")
+                model_env_key = "GEMINI_MODEL"
+                timeout_env_key = "GEMINI_TIMEOUT"
+                original_timeout = os.environ.get("GEMINI_TIMEOUT")
+                os.environ["LLM_PROVIDER"] = "gemini"
+                os.environ["GEMINI_MODEL"] = request.llm_model
+                if request.llm_timeout:
+                    os.environ["GEMINI_TIMEOUT"] = str(request.llm_timeout)
+            
+            # Сбрасываем синглтон для переинициализации с новыми настройками
+            from services.llm_client import reset_llm_client
+            reset_llm_client()
+            
+            try:
+                llm_client = get_llm_client(provider=request.llm_provider)
+            finally:
+                # Восстанавливаем оригинальные значения
+                if original_provider:
+                    os.environ["LLM_PROVIDER"] = original_provider
+                else:
+                    os.environ.pop("LLM_PROVIDER", None)
+                
+                if model_env_key:
+                    if original_model:
+                        os.environ[model_env_key] = original_model
+                    else:
+                        os.environ.pop(model_env_key, None)
+                
+                # Восстанавливаем таймаут
+                if timeout_env_key:
+                    if original_timeout:
+                        os.environ[timeout_env_key] = original_timeout
+                    else:
+                        os.environ.pop(timeout_env_key, None)
+                
+                # Восстанавливаем синглтон
+                reset_llm_client()
+        else:
+            llm_client = get_llm_client()
         
         # Построение фильтров из запроса
         filters = {}
@@ -945,9 +1402,24 @@ async def diagnose_problem(request: DiagnosticRequest):
 - Ссылками на источники (если есть)
 """
         
+        # Получаем таймаут из запроса или используем значение по умолчанию
+        llm_timeout = None
+        if request.llm_timeout:
+            llm_timeout = request.llm_timeout
+        elif request.llm_provider:
+            # Получаем таймаут из переменных окружения для выбранного провайдера
+            import os
+            if request.llm_provider == "ollama":
+                llm_timeout = int(os.getenv("OLLAMA_TIMEOUT", "500"))
+            elif request.llm_provider == "openai":
+                llm_timeout = int(os.getenv("OPENAI_TIMEOUT", "600"))
+            elif request.llm_provider == "gemini":
+                llm_timeout = int(os.getenv("GEMINI_TIMEOUT", "600"))
+        
         answer = await llm_client.generate(
             prompt=prompt,
-            system_prompt="Ты эксперт по диагностике проблем 3D-печати. Отвечай конкретно и структурированно."
+            system_prompt="Ты эксперт по диагностике проблем 3D-печати. Отвечай конкретно и структурированно.",
+            timeout=llm_timeout
         )
         
         # Оценка уверенности
@@ -972,7 +1444,17 @@ async def diagnose_problem(request: DiagnosticRequest):
         raise
     except ConnectionError as e:
         error_msg = str(e)
-        if "ollama" in error_msg.lower() or "connection refused" in error_msg.lower():
+        # Проверяем, является ли это таймаутом
+        if "не ответил в течение" in error_msg or "timeout" in error_msg.lower():
+            logger.warning(f"⏱️ Таймаут LLM запроса: {e}")
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    f"Превышено время ожидания ответа от LLM. {error_msg} "
+                    "Попробуйте увеличить таймаут в настройках или использовать более быструю модель."
+                )
+            )
+        elif "ollama" in error_msg.lower() or "connection refused" in error_msg.lower():
             logger.error(f"Ошибка подключения к LLM сервису: {e}", exc_info=True)
             raise HTTPException(
                 status_code=503,

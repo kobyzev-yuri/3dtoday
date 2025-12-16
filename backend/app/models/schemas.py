@@ -24,6 +24,9 @@ class DiagnosticRequest(BaseModel):
         default_factory=list,
         description="История диалога"
     )
+    llm_provider: Optional[str] = Field(None, description="Провайдер LLM (openai, ollama, gemini)")
+    llm_model: Optional[str] = Field(None, description="Модель LLM")
+    llm_timeout: Optional[int] = Field(None, description="Таймаут для LLM запроса в секундах")
 
 
 class ClarificationQuestion(BaseModel):
