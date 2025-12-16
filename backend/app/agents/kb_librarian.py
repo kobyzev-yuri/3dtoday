@@ -192,6 +192,8 @@ class KBLibrarianAgent:
                 "reason": decision["reason"],
                 "relevance_score": relevance_check.get("score", 0.0),
                 "quality_score": relevance_check.get("quality_score", 0.0),
+                "is_relevant": relevance_check.get("is_relevant", False),
+                "has_valuable_info": relevance_check.get("has_valuable_info", False),
                 "duplicate_check": duplicate_check,
                 "abstract": abstract,
                 "summary": summary,
@@ -269,11 +271,17 @@ class KBLibrarianAgent:
 - Статьи из википедии 3D-печати РЕЛЕВАНТНЫ
 - Отклоняй только контент не связанный с 3D-печатью
 
+КРИТИЧЕСКИ ВАЖНО - СООТВЕТСТВИЕ score и is_relevant:
+- Если score >= 0.7, то is_relevant ДОЛЖЕН быть true
+- Если score < 0.6, то is_relevant ДОЛЖЕН быть false
+- Если 0.6 <= score < 0.7, то is_relevant может быть true или false в зависимости от контекста
+- НЕ ДОПУСКАЙ противоречий: если score высокий (>= 0.7), но is_relevant=false - это ОШИБКА
+
 Верни ТОЛЬКО валидный JSON:
 {{
     "score": 0.0-1.0,
     "quality_score": 0.0-1.0,
-    "is_relevant": true/false,
+    "is_relevant": true/false (ДОЛЖЕН соответствовать score: true если score >= 0.7, false если score < 0.6),
     "has_valuable_info": true/false,
     "issues": ["проблема1", "проблема2"] или [],
     "strengths": ["сильная сторона1"] или []
@@ -288,6 +296,20 @@ class KBLibrarianAgent:
             
             json_data = self._extract_json(response)
             if json_data:
+                # Проверка и исправление противоречий между score и is_relevant
+                score = json_data.get("score", 0.0)
+                is_relevant = json_data.get("is_relevant", False)
+                
+                # Если score >= 0.7, но is_relevant=False - исправляем
+                if score >= 0.7 and not is_relevant:
+                    logger.warning(f"⚠️ Противоречие: score={score:.2f} >= 0.7, но is_relevant=False. Исправляю на True.")
+                    json_data["is_relevant"] = True
+                
+                # Если score < 0.6, но is_relevant=True - исправляем
+                if score < 0.6 and is_relevant:
+                    logger.warning(f"⚠️ Противоречие: score={score:.2f} < 0.6, но is_relevant=True. Исправляю на False.")
+                    json_data["is_relevant"] = False
+                
                 return json_data
             
         except Exception as e:
@@ -507,7 +529,7 @@ Abstract:"""
                 "recommendations": relevance_check.get("issues", [])
             }
         
-        if relevance_score >= 0.7 and quality_score >= 0.7 and not is_duplicate:
+        if relevance_score >= 0.7 and quality_score >= 0.7 and is_relevant and has_valuable_info and not is_duplicate:
             return {
                 "decision": "approve",
                 "reason": f"Документ релевантен и качественен (relevance: {relevance_score:.2f}, quality: {quality_score:.2f}). {', '.join(relevance_check.get('strengths', []))}",

@@ -1,0 +1,162 @@
+{
+  "priority_high": {
+    "stringing": [
+      {
+        "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/stringing-or-oozing/",
+        "description": "Simplify3D - Stringing с изображениями и решениями",
+        "problem_type": "stringing",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://all3dp.com/2/3d-print-stringing-how-to-fix-it/",
+        "description": "All3DP - Как исправить stringing",
+        "problem_type": "stringing",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://help.prusa3d.com/article/stringing-or-oozing_1256",
+        "description": "Prusa Knowledge Base - Stringing",
+        "problem_type": "stringing",
+        "has_images": true,
+        "language": "en"
+      }
+    ],
+    "warping": [
+      {
+        "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/warping/",
+        "description": "Simplify3D - Warping с изображениями",
+        "problem_type": "warping",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://all3dp.com/2/3d-printing-warping-how-to-fix-it/",
+        "description": "All3DP - Как исправить warping",
+        "problem_type": "warping",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://help.prusa3d.com/article/warping_1257",
+        "description": "Prusa Knowledge Base - Warping",
+        "problem_type": "warping",
+        "has_images": true,
+        "language": "en"
+      }
+    ],
+    "layer_separation": [
+      {
+        "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/layer-separation-and-splitting/",
+        "description": "Simplify3D - Layer Separation",
+        "problem_type": "layer_separation",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://all3dp.com/2/3d-print-layer-separation-how-to-fix-it/",
+        "description": "All3DP - Как исправить расслоение слоев",
+        "problem_type": "layer_separation",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://help.prusa3d.com/article/layer-separation-and-splitting_1258",
+        "description": "Prusa Knowledge Base - Layer Separation",
+        "problem_type": "layer_separation",
+        "has_images": true,
+        "language": "en"
+      }
+    ]
+  },
+  "priority_medium": {
+    "bed_adhesion": [
+      {
+        "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/not-sticking-to-the-bed/",
+        "description": "Simplify3D - Проблемы с адгезией к столу",
+        "problem_type": "bed_adhesion",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://all3dp.com/2/3d-print-not-sticking-to-bed-how-to-fix-it/",
+        "description": "All3DP - Как исправить адгезию",
+        "problem_type": "bed_adhesion",
+        "has_images": true,
+        "language": "en"
+      }
+    ],
+    "under_extrusion": [
+      {
+        "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/under-extrusion/",
+        "description": "Simplify3D - Under-extrusion",
+        "problem_type": "underextrusion",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://all3dp.com/2/3d-printing-under-extrusion-how-to-fix-it/",
+        "description": "All3DP - Как исправить недоэкструзию",
+        "problem_type": "underextrusion",
+        "has_images": true,
+        "language": "en"
+      }
+    ],
+    "over_extrusion": [
+      {
+        "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/over-extrusion/",
+        "description": "Simplify3D - Over-extrusion",
+        "problem_type": "overextrusion",
+        "has_images": true,
+        "language": "en"
+      },
+      {
+        "url": "https://all3dp.com/2/3d-printing-over-extrusion-how-to-fix-it/",
+        "description": "All3DP - Как исправить переэкструзию",
+        "problem_type": "overextrusion",
+        "has_images": true,
+        "language": "en"
+      }
+    ]
+  },
+  "russian_sources": {
+    "3dtoday": [
+      {
+        "url": "https://3dtoday.ru/blogs/tech/",
+        "description": "Раздел Техничка на 3dtoday.ru",
+        "has_images": true,
+        "language": "ru",
+        "note": "Нужно найти конкретные статьи с картинками дефектов"
+      },
+      {
+        "url": "https://3dtoday.ru/questions",
+        "description": "Вопросы и ответы на 3dtoday.ru",
+        "has_images": true,
+        "language": "ru",
+        "note": "Много примеров проблем с фотографиями"
+      }
+    ]
+  },
+  "technical_diagrams": [
+    {
+      "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/dimensional-accuracy/",
+      "description": "Схемы точности размеров",
+      "content_type": "diagram",
+      "has_images": true
+    },
+    {
+      "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/poor-bridging/",
+      "description": "Схемы bridging",
+      "content_type": "diagram",
+      "has_images": true
+    }
+  ],
+  "usage_notes": {
+    "how_to_add": "Используйте административный интерфейс (admin_ui.py) с методом 'По URL (через LLM)' для автоматического извлечения изображений",
+    "priority": "Начните с priority_high - это основные дефекты с качественными изображениями",
+    "image_extraction": "Система автоматически извлечет все изображения из статей и проиндексирует их в коллекцию kb_3dtoday_images"
+  }
+}
+
+

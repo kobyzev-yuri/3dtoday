@@ -206,7 +206,7 @@ class VectorDBService:
             Список найденных статей с метаданными
         """
         try:
-            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
             
             # Определяем коллекцию
             collection = self.image_collection_name if is_image else self.collection_name
@@ -225,20 +225,42 @@ class VectorDBService:
                     )
                 
                 if "printer_models" in filters:
-                    conditions.append(
-                        FieldCondition(
-                            key="printer_models",
-                            match=MatchValue(value=filters["printer_models"])
+                    printer_models = filters["printer_models"]
+                    # Если это список, используем MatchAny для проверки наличия любого элемента
+                    if isinstance(printer_models, list):
+                        conditions.append(
+                            FieldCondition(
+                                key="printer_models",
+                                match=MatchAny(any=printer_models)
+                            )
                         )
-                    )
+                    else:
+                        # Если одно значение, используем MatchValue
+                        conditions.append(
+                            FieldCondition(
+                                key="printer_models",
+                                match=MatchValue(value=printer_models)
+                            )
+                        )
                 
                 if "materials" in filters:
-                    conditions.append(
-                        FieldCondition(
-                            key="materials",
-                            match=MatchValue(value=filters["materials"])
+                    materials = filters["materials"]
+                    # Если это список, используем MatchAny для проверки наличия любого элемента
+                    if isinstance(materials, list):
+                        conditions.append(
+                            FieldCondition(
+                                key="materials",
+                                match=MatchAny(any=materials)
+                            )
                         )
-                    )
+                    else:
+                        # Если одно значение, используем MatchValue
+                        conditions.append(
+                            FieldCondition(
+                                key="materials",
+                                match=MatchValue(value=materials)
+                            )
+                        )
                 
                 if conditions:
                     qdrant_filter = Filter(must=conditions)

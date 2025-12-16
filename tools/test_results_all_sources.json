@@ -1,0 +1,140 @@
+{
+  "timestamp": "2025-12-09 23:57:02",
+  "total": 12,
+  "successful": 0,
+  "failed": 12,
+  "results": [
+    {
+      "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/stringing-or-oozing/",
+      "problem_type": "stringing",
+      "description": "Simplify3D - Stringing с изображениями и решениями",
+      "success": false,
+      "error": "Релевантность (0.50) ниже порога (0.6)",
+      "relevance_score": 0.5,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://all3dp.com/2/3d-print-stringing-how-to-fix-it/",
+      "problem_type": "stringing",
+      "description": "All3DP - Как исправить stringing",
+      "success": false,
+      "error": "HTTP 404: {\"detail\":\"Не удалось распарсить документ\"}",
+      "relevance_score": 0.0,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://help.prusa3d.com/article/stringing-or-oozing_1256",
+      "problem_type": "stringing",
+      "description": "Prusa Knowledge Base - Stringing",
+      "success": false,
+      "error": "HTTP 404: {\"detail\":\"Не удалось распарсить документ\"}",
+      "relevance_score": 0.0,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/warping/",
+      "problem_type": "warping",
+      "description": "Simplify3D - Warping с изображениями",
+      "success": false,
+      "error": "Релевантность (0.50) ниже порога (0.6)",
+      "relevance_score": 0.5,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://all3dp.com/2/3d-printing-warping-how-to-fix-it/",
+      "problem_type": "warping",
+      "description": "All3DP - Как исправить warping",
+      "success": false,
+      "error": "HTTP 404: {\"detail\":\"Не удалось распарсить документ\"}",
+      "relevance_score": 0.0,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://help.prusa3d.com/article/warping_1257",
+      "problem_type": "warping",
+      "description": "Prusa Knowledge Base - Warping",
+      "success": false,
+      "error": "HTTP 404: {\"detail\":\"Не удалось распарсить документ\"}",
+      "relevance_score": 0.0,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/layer-separation-and-splitting/",
+      "problem_type": "layer_separation",
+      "description": "Simplify3D - Layer Separation",
+      "success": false,
+      "error": "Релевантность (0.50) ниже порога (0.6)",
+      "relevance_score": 0.5,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://all3dp.com/2/3d-print-layer-separation-how-to-fix-it/",
+      "problem_type": "layer_separation",
+      "description": "All3DP - Как исправить расслоение слоев",
+      "success": false,
+      "error": "HTTP 404: {\"detail\":\"Не удалось распарсить документ\"}",
+      "relevance_score": 0.0,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://help.prusa3d.com/article/layer-separation-and-splitting_1258",
+      "problem_type": "layer_separation",
+      "description": "Prusa Knowledge Base - Layer Separation",
+      "success": false,
+      "error": "HTTP 404: {\"detail\":\"Не удалось распарсить документ\"}",
+      "relevance_score": 0.0,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/not-sticking-to-the-bed/",
+      "problem_type": "bed_adhesion",
+      "description": "Simplify3D - Проблемы с адгезией к столу",
+      "success": false,
+      "error": "Релевантность (0.50) ниже порога (0.6)",
+      "relevance_score": 0.5,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/under-extrusion/",
+      "problem_type": "underextrusion",
+      "description": "Simplify3D - Under-extrusion",
+      "success": false,
+      "error": "Релевантность (0.50) ниже порога (0.6)",
+      "relevance_score": 0.5,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    },
+    {
+      "url": "https://www.simplify3d.com/resources/print-quality-troubleshooting/over-extrusion/",
+      "problem_type": "overextrusion",
+      "description": "Simplify3D - Over-extrusion",
+      "success": false,
+      "error": "Релевантность (0.50) ниже порога (0.6)",
+      "relevance_score": 0.5,
+      "images_count": 0,
+      "indexed_images": 0,
+      "article_id": null
+    }
+  ]
+}

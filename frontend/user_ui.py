@@ -334,11 +334,22 @@ with st.sidebar:
     if "timeout_values" not in st.session_state:
         st.session_state.timeout_values = {}
     
+    # Автоматическое определение таймаута для Ollama в зависимости от модели
+    ollama_timeout_default = int(os.getenv("OLLAMA_TIMEOUT", "100"))
+    if st.session_state.get("llm_provider") == "ollama" and st.session_state.get("llm_model"):
+        selected_model = st.session_state.get("llm_model", "")
+        # Определяем, тяжелая ли модель
+        heavy_models = ["qwen3:8b", "qwen3", "llama3.1:70b", "llama3:70b"]
+        if any(heavy in selected_model.lower() for heavy in ["qwen3:8b", "qwen3", "70b"]):
+            ollama_timeout_default = int(os.getenv("OLLAMA_TIMEOUT_HEAVY", "900"))
+        else:
+            ollama_timeout_default = int(os.getenv("OLLAMA_TIMEOUT_LIGHT", "100"))
+    
     default_timeouts = {
         "Диагностика (общий)": int(os.getenv("DIAGNOSTIC_TIMEOUT", os.getenv("API_REQUEST_TIMEOUT", "300"))),
-        "LLM генерация (Ollama)": int(os.getenv("OLLAMA_TIMEOUT", "500")),
-        "LLM генерация (OpenAI)": int(os.getenv("OPENAI_TIMEOUT", "120")),
-        "LLM генерация (Gemini)": int(os.getenv("GEMINI_TIMEOUT", "120")),
+        "LLM генерация (Ollama)": ollama_timeout_default,
+        "LLM генерация (OpenAI)": int(os.getenv("OPENAI_TIMEOUT", "600")),
+        "LLM генерация (Gemini)": int(os.getenv("GEMINI_TIMEOUT", "600")),
         "RAG поиск": int(os.getenv("RAG_SEARCH_TIMEOUT", "30")),
         "API запросы": int(os.getenv("API_REQUEST_TIMEOUT", "300"))
     }
@@ -346,7 +357,29 @@ with st.sidebar:
     timeout_values = {}
     for timeout_name, default_value in default_timeouts.items():
         # Используем сохраненное значение или дефолтное
-        current_value = st.session_state.timeout_values.get(timeout_name, default_value)
+        # Для Ollama автоматически определяем таймаут только при первом выборе модели
+        if timeout_name == "LLM генерация (Ollama)" and st.session_state.get("llm_provider") == "ollama":
+            current_model = st.session_state.get("llm_model", "")
+            saved_timeout = st.session_state.timeout_values.get(timeout_name)
+            saved_model = st.session_state.get("_last_ollama_model_for_timeout", "")
+            
+            # Если модель изменилась И значение не было установлено пользователем явно
+            if current_model and current_model != saved_model:
+                is_heavy = any(heavy in current_model.lower() for heavy in ["qwen3:8b", "qwen3", "70b"])
+                expected_timeout = int(os.getenv("OLLAMA_TIMEOUT_HEAVY", "900")) if is_heavy else int(os.getenv("OLLAMA_TIMEOUT_LIGHT", "100"))
+                # Устанавливаем автоматически только если значение не было сохранено пользователем
+                if saved_timeout is None:
+                    current_value = expected_timeout
+                    st.session_state["_last_ollama_model_for_timeout"] = current_model
+                else:
+                    # Сохраняем значение пользователя
+                    current_value = saved_timeout
+            else:
+                # Используем сохраненное значение или дефолтное
+                current_value = saved_timeout if saved_timeout is not None else default_value
+        else:
+            current_value = st.session_state.timeout_values.get(timeout_name, default_value)
+        
         timeout_values[timeout_name] = st.number_input(
             timeout_name,
             min_value=5,
@@ -357,7 +390,20 @@ with st.sidebar:
             key=f"timeout_{timeout_name}"
         )
     
+    # Автоматическая синхронизация: общий таймаут должен быть >= таймауту LLM
+    llm_provider = st.session_state.get("llm_provider", "")
+    if llm_provider:
+        llm_timeout_key = f"LLM генерация ({'Ollama' if llm_provider == 'ollama' else 'OpenAI' if llm_provider == 'openai' else 'Gemini'})"
+        llm_timeout = timeout_values.get(llm_timeout_key, 300)
+        diagnostic_timeout = timeout_values.get("Диагностика (общий)", 300)
+        
+        # Если общий таймаут меньше таймаута LLM, автоматически увеличиваем
+        if diagnostic_timeout < llm_timeout:
+            timeout_values["Диагностика (общий)"] = llm_timeout + 60  # Добавляем 60 сек запаса
+            st.info(f"💡 Общий таймаут автоматически увеличен до {timeout_values['Диагностика (общий)']} сек (таймаут LLM: {llm_timeout} сек)")
+    
     # Сохранение в session state
+    # Примечание: значения виджетов автоматически сохраняются Streamlit через key
     st.session_state.timeout_values = timeout_values
     
     st.markdown("---")
@@ -557,13 +603,28 @@ if submitted:
                 })
         
         # Получаем таймаут для LLM из настроек
+        # ВАЖНО: Берем значение напрямую из ключа number_input (самое актуальное)
         llm_timeout = None
         if st.session_state.get("llm_provider") == "ollama":
-            llm_timeout = st.session_state.timeout_values.get("LLM генерация (Ollama)")
+            # Сначала пробуем получить из ключа number_input (самое актуальное значение)
+            llm_timeout = st.session_state.get("timeout_LLM генерация (Ollama)")
+            # Если нет, берем из timeout_values
+            if llm_timeout is None:
+                llm_timeout = st.session_state.timeout_values.get("LLM генерация (Ollama)")
+            # Если все еще нет, используем дефолтное значение на основе модели
+            if llm_timeout is None:
+                current_model = st.session_state.get("llm_model", "")
+                if any(heavy in current_model.lower() for heavy in ["qwen3:8b", "qwen3", "70b"]):
+                    llm_timeout = int(os.getenv("OLLAMA_TIMEOUT_HEAVY", "900"))
+                else:
+                    llm_timeout = int(os.getenv("OLLAMA_TIMEOUT_LIGHT", "100"))
         elif st.session_state.get("llm_provider") == "openai":
-            llm_timeout = st.session_state.timeout_values.get("LLM генерация (OpenAI)")
+            llm_timeout = st.session_state.get("timeout_LLM генерация (OpenAI)") or st.session_state.timeout_values.get("LLM генерация (OpenAI)")
         elif st.session_state.get("llm_provider") == "gemini":
-            llm_timeout = st.session_state.timeout_values.get("LLM генерация (Gemini)")
+            llm_timeout = st.session_state.get("timeout_LLM генерация (Gemini)") or st.session_state.timeout_values.get("LLM генерация (Gemini)")
+        
+        # Логируем для отладки
+        logger.debug(f"LLM timeout для {st.session_state.get('llm_provider')}: {llm_timeout} (из ключа: {st.session_state.get('timeout_LLM генерация (Ollama)' if st.session_state.get('llm_provider') == 'ollama' else 'timeout_LLM генерация (OpenAI)' if st.session_state.get('llm_provider') == 'openai' else 'timeout_LLM генерация (Gemini)')})")
         
         request_data = {
             "query": query,
@@ -579,10 +640,20 @@ if submitted:
         logger.debug(f"Request data: {json.dumps(request_data, ensure_ascii=False, indent=2)}")
         
         # Получаем таймаут из настроек
-        diagnostic_timeout = float(st.session_state.timeout_values.get(
-            "Диагностика (общий)", 
-            DIAGNOSTIC_TIMEOUT
-        ))
+        # Автоматически синхронизируем с таймаутом LLM
+        llm_provider = st.session_state.get("llm_provider", "")
+        if llm_provider and llm_timeout:
+            diagnostic_timeout_base = float(st.session_state.timeout_values.get(
+                "Диагностика (общий)", 
+                DIAGNOSTIC_TIMEOUT
+            ))
+            # Общий таймаут должен быть >= таймауту LLM + запас
+            diagnostic_timeout = max(diagnostic_timeout_base, float(llm_timeout) + 60)
+        else:
+            diagnostic_timeout = float(st.session_state.timeout_values.get(
+                "Диагностика (общий)", 
+                DIAGNOSTIC_TIMEOUT
+            ))
         
         with st.spinner(f"🔍 Анализ проблемы и поиск решений... (это может занять до {int(diagnostic_timeout)} секунд)"):
             try:

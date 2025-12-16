@@ -116,7 +116,8 @@ async def parse_url_with_llm(
     request: Optional[Dict[str, Any]] = Body(None),
     url: Optional[str] = Body(None),
     llm_provider: Optional[str] = Body(None),
-    model: Optional[str] = Body(None)
+    model: Optional[str] = Body(None),
+    llm_timeout: Optional[int] = Body(None)
 ):
     """
     Парсинг URL напрямую через LLM (GPT-4o или Gemini 3)
@@ -139,6 +140,7 @@ async def parse_url_with_llm(
             url = url or request.get("url")
             llm_provider = llm_provider or request.get("llm_provider", "openai")
             model = model or request.get("model")
+            llm_timeout = llm_timeout or request.get("llm_timeout")
         else:
             url = url
             llm_provider = llm_provider or "openai"
@@ -151,7 +153,7 @@ async def parse_url_with_llm(
         
         from services.llm_url_analyzer import LLMURLAnalyzer
         
-        analyzer = LLMURLAnalyzer(llm_provider=llm_provider, model=model)
+        analyzer = LLMURLAnalyzer(llm_provider=llm_provider, model=model, timeout=llm_timeout)
         result = await analyzer.analyze_url(url)
         
         if not result:
@@ -180,6 +182,7 @@ async def parse_document(
     llm_provider: Optional[str] = Body(None),
     model: Optional[str] = Body(None),
     timeout: Optional[int] = Body(None),
+    llm_timeout: Optional[int] = Body(None),
     max_pages: Optional[int] = Body(None)
 ):
     """
@@ -213,6 +216,7 @@ async def parse_document(
             llm_provider = llm_provider or request.get("llm_provider")
             model = model or request.get("model")
             timeout = timeout or request.get("timeout")
+            llm_timeout = llm_timeout or request.get("llm_timeout")
             max_pages = max_pages or request.get("max_pages")
         
         if not source:
@@ -283,10 +287,12 @@ async def parse_document(
         
         # Полный цикл: анализ + решение о публикации через агента-библиотекаря
         # Передаем провайдер и модель в агента для правильной инициализации
-        logger.info(f"🤖 Инициализация агента-библиотекаря: llm_provider={llm_provider}, model={model}, timeout={timeout}")
+        # Используем llm_timeout если указан, иначе timeout (для обратной совместимости)
+        final_llm_timeout = llm_timeout or timeout
+        logger.info(f"🤖 Инициализация агента-библиотекаря: llm_provider={llm_provider}, model={model}, timeout={final_llm_timeout}")
         
         try:
-            librarian = KBLibrarianAgent(llm_provider=llm_provider, model=model, timeout=timeout)
+            librarian = KBLibrarianAgent(llm_provider=llm_provider, model=model, timeout=final_llm_timeout)
             logger.info(f"📋 Начало анализа через агента-библиотекаря...")
             review_result = await librarian.review_and_decide(
                 title=doc_data["title"],

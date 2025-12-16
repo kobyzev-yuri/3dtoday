@@ -168,10 +168,19 @@ with st.sidebar:
     # Настройки таймаутов
     st.subheader("⏱️ Таймауты (сек)")
     
+    # Автоматическое определение таймаута для Ollama в зависимости от модели
+    ollama_timeout_default = int(os.getenv("OLLAMA_TIMEOUT", "500"))
+    if llm_provider == "ollama" and selected_model:
+        heavy_models = ["qwen3:8b", "qwen3", "llama3.1:70b", "llama3:70b"]
+        if any(heavy in selected_model.lower() for heavy in ["qwen3:8b", "qwen3", "70b"]):
+            ollama_timeout_default = int(os.getenv("OLLAMA_TIMEOUT_HEAVY", "900"))
+        else:
+            ollama_timeout_default = int(os.getenv("OLLAMA_TIMEOUT_LIGHT", "100"))
+    
     default_timeouts = {
         "API запросы": int(os.getenv("API_REQUEST_TIMEOUT", "300")),  # Увеличено для сложных операций
         "Парсинг документов": int(os.getenv("DOCUMENT_PARSER_TIMEOUT", "60")),
-        "LLM генерация (Ollama)": int(os.getenv("OLLAMA_TIMEOUT", "500")),
+        "LLM генерация (Ollama)": ollama_timeout_default,
         "LLM генерация (OpenAI)": int(os.getenv("OPENAI_TIMEOUT", "120")),  # Увеличено для GPT-4o
         "MCP сервер": int(os.getenv("MCP_SERVER_TIMEOUT", "300")),  # Увеличено для полного цикла
         "RAG поиск": int(os.getenv("RAG_SEARCH_TIMEOUT", "30")),
@@ -441,18 +450,37 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
     
     elif submitted_llm and source:
         api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
-        actual_timeout = max(api_timeout, 300)
+        
+        # Получаем таймаут для выбранного LLM провайдера
+        llm_timeout = None
+        if llm_provider_choice == "openai":
+            llm_timeout = st.session_state.get("timeout_values", {}).get("LLM генерация (OpenAI)", int(os.getenv("OPENAI_TIMEOUT", "120")))
+        elif llm_provider_choice == "gemini":
+            # Для Gemini используем таймаут OpenAI (если нет отдельного)
+            llm_timeout = st.session_state.get("timeout_values", {}).get("LLM генерация (OpenAI)", int(os.getenv("GEMINI_TIMEOUT", "120")))
+        
+        # Общий таймаут должен быть больше таймаута LLM + буфер
+        if llm_timeout:
+            actual_timeout = max(api_timeout, llm_timeout + 60)  # Буфер 60 секунд
+        else:
+            actual_timeout = max(api_timeout, 300)
         
         with st.spinner(f"🤖 LLM анализирует URL... (это может занять время, таймаут: {actual_timeout} сек)"):
             try:
+                request_data = {
+                    "url": source,
+                    "llm_provider": llm_provider_choice,
+                    "model": model_choice
+                }
+                
+                # Добавляем таймаут LLM, если указан
+                if llm_timeout:
+                    request_data["llm_timeout"] = llm_timeout
+                
                 with httpx.Client(timeout=float(actual_timeout)) as client:
                     response = client.post(
                         f"{API_BASE_URL}/api/kb/articles/parse_with_llm",
-                        json={
-                            "url": source,
-                            "llm_provider": llm_provider_choice,
-                            "model": model_choice
-                        },
+                        json=request_data,
                         timeout=float(actual_timeout)
                     )
                     
@@ -938,22 +966,41 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
         api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
         mcp_timeout = st.session_state.get("timeout_values", {}).get("MCP сервер", int(os.getenv("MCP_SERVER_TIMEOUT", "300")))
         
-        # Увеличиваем таймаут для сложных операций
-        # GPT-4o может работать медленнее, Ollama тоже может требовать больше времени
-        actual_timeout = max(api_timeout, 300)  # Минимум 5 минут
+        # Получаем таймаут для выбранного LLM провайдера
+        llm_provider_for_timeout = st.session_state.get("llm_provider", os.getenv("LLM_PROVIDER", "ollama"))
+        llm_timeout = None
+        if llm_provider_for_timeout == "ollama":
+            llm_timeout = st.session_state.get("timeout_values", {}).get("LLM генерация (Ollama)", int(os.getenv("OLLAMA_TIMEOUT", "500")))
+        elif llm_provider_for_timeout == "openai":
+            llm_timeout = st.session_state.get("timeout_values", {}).get("LLM генерация (OpenAI)", int(os.getenv("OPENAI_TIMEOUT", "120")))
+        elif llm_provider_for_timeout == "gemini":
+            # Для Gemini используем таймаут OpenAI (если нет отдельного)
+            llm_timeout = st.session_state.get("timeout_values", {}).get("LLM генерация (OpenAI)", int(os.getenv("GEMINI_TIMEOUT", "120")))
+        
+        # Общий таймаут должен быть больше таймаута LLM + буфер
+        if llm_timeout:
+            actual_timeout = max(api_timeout, llm_timeout + 60, 300)  # Буфер 60 секунд, минимум 5 минут
+        else:
+            actual_timeout = max(api_timeout, 300)  # Минимум 5 минут
         
         with st.spinner(f"📥 Скачивание и анализ статьи... (таймаут: {actual_timeout} сек)"):
             try:
+                request_data = {
+                    "source": source,
+                    "source_type": source_type if source_type != "auto" else None,
+                    "llm_provider": llm_provider_for_timeout,
+                    "model": st.session_state.get("selected_model", os.getenv("OLLAMA_MODEL", "qwen3:8b")),
+                    "timeout": mcp_timeout
+                }
+                
+                # Добавляем таймаут LLM, если указан
+                if llm_timeout:
+                    request_data["llm_timeout"] = llm_timeout
+                
                 with httpx.Client(timeout=float(actual_timeout)) as client:
                     response = client.post(
                         f"{API_BASE_URL}/api/kb/articles/parse",
-                        json={
-                            "source": source,
-                            "source_type": source_type if source_type != "auto" else None,
-                            "llm_provider": st.session_state.get("llm_provider", os.getenv("LLM_PROVIDER", "ollama")),
-                            "model": st.session_state.get("selected_model", os.getenv("OLLAMA_MODEL", "qwen3:8b")),
-                            "timeout": mcp_timeout
-                        }
+                        json=request_data
                     )
                     
                     if response.status_code == 200:

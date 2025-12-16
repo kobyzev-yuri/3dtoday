@@ -414,7 +414,14 @@ class DocumentParser:
             return None
     
     async def _parse_html(self, source: str) -> Optional[Dict[str, Any]]:
-        """Парсинг HTML документа (использует ArticleParser)"""
+        """
+        Парсинг HTML документа с многоуровневой стратегией:
+        1. Trafilatura (лучший универсальный парсер)
+        2. Readability-lxml (альтернативный парсер)
+        3. LLM парсинг (если доступен)
+        4. ArticleParser (для 3dtoday.ru)
+        5. BeautifulSoup fallback
+        """
         try:
             # Проверка типа страницы перед парсингом
             page_type = await self._detect_page_type(source)
@@ -466,7 +473,31 @@ class DocumentParser:
                     return article_data
                 return None
             
-            # Для статей используем ArticleParser
+            # Многоуровневая стратегия парсинга для универсальных URL
+            
+            # УРОВЕНЬ 1: Trafilatura (лучший универсальный парсер)
+            logger.info(f"🔍 Попытка парсинга через Trafilatura...")
+            article_data = await self._parse_with_trafilatura(source)
+            if article_data and article_data.get("content") and len(article_data.get("content", "")) > 100:
+                logger.info(f"✅ Успешно распарсено через Trafilatura: {len(article_data.get('content', ''))} символов, {len(article_data.get('images', []))} изображений")
+                content_type = self._detect_content_type(article_data)
+                article_data["content_type"] = content_type
+                return article_data
+            else:
+                logger.info(f"⚠️ Trafilatura не смог извлечь достаточно контента, пробуем следующий метод...")
+            
+            # УРОВЕНЬ 2: Readability-lxml
+            logger.info(f"🔍 Попытка парсинга через Readability...")
+            article_data = await self._parse_with_readability(source)
+            if article_data and article_data.get("content") and len(article_data.get("content", "")) > 100:
+                logger.info(f"✅ Успешно распарсено через Readability: {len(article_data.get('content', ''))} символов, {len(article_data.get('images', []))} изображений")
+                content_type = self._detect_content_type(article_data)
+                article_data["content_type"] = content_type
+                return article_data
+            else:
+                logger.info(f"⚠️ Readability не смог извлечь достаточно контента, пробуем следующий метод...")
+            
+            # УРОВЕНЬ 3: ArticleParser (для 3dtoday.ru и похожих сайтов)
             try:
                 from backend.app.services.article_parser import ArticleParser
             except ImportError:
@@ -475,15 +506,242 @@ class DocumentParser:
             parser = ArticleParser()
             article_data = await parser.parse_article(source)
             
-            if article_data:
-                # Определение типа контента по содержимому
+            if article_data and article_data.get("content") and len(article_data.get("content", "")) > 100:
+                logger.info(f"✅ Успешно распарсено через ArticleParser: {len(article_data.get('content', ''))} символов")
                 content_type = self._detect_content_type(article_data)
                 article_data["content_type"] = content_type
+                return article_data
             
-            return article_data
+            # УРОВЕНЬ 4: BeautifulSoup fallback
+            article_data = await self._parse_with_beautifulsoup(source)
+            if article_data and article_data.get("content") and len(article_data.get("content", "")) > 100:
+                logger.info(f"✅ Успешно распарсено через BeautifulSoup: {len(article_data.get('content', ''))} символов")
+                content_type = self._detect_content_type(article_data)
+                article_data["content_type"] = content_type
+                return article_data
+            
+            # Если ничего не сработало
+            logger.warning(f"⚠️ Не удалось извлечь контент ни одним из методов парсинга")
+            return {
+                "title": "Не удалось распарсить",
+                "content": "",
+                "url": source,
+                "section": "unknown",
+                "date": "",
+                "images": [],
+                "content_type": "article",
+                "error": "Не удалось извлечь контент из страницы"
+            }
             
         except Exception as e:
             logger.error(f"❌ Ошибка парсинга HTML: {e}", exc_info=True)
+            return None
+    
+    async def _parse_with_trafilatura(self, url: str) -> Optional[Dict[str, Any]]:
+        """Парсинг через Trafilatura (лучший универсальный парсер)"""
+        try:
+            import trafilatura
+            
+            # Загружаем HTML
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
+            
+            # Парсинг через Trafilatura
+            extracted = trafilatura.extract(
+                html,
+                include_comments=False,
+                include_tables=True,
+                include_images=True,
+                include_links=True,
+                favor_recall=True  # Предпочитаем полноту извлечения
+            )
+            
+            if not extracted or len(extracted) < 100:
+                return None
+            
+            # Получаем метаданные
+            metadata = trafilatura.extract_metadata(html)
+            
+            # Извлекаем изображения
+            images = []
+            try:
+                # Trafilatura может извлекать изображения через extract_images
+                # Но также можем извлечь их из HTML напрямую
+                soup = BeautifulSoup(html, 'html.parser')
+                for img in soup.find_all('img'):
+                    img_url = img.get('src', '')
+                    if img_url:
+                        if not img_url.startswith('http'):
+                            from urllib.parse import urljoin
+                            img_url = urljoin(url, img_url)
+                        images.append({
+                            "url": img_url,
+                            "alt": img.get('alt', ''),
+                            "title": img.get('title', '')
+                        })
+                logger.info(f"📷 Извлечено {len(images)} изображений из HTML")
+            except Exception as e:
+                logger.debug(f"Не удалось извлечь изображения: {e}")
+            
+            return {
+                "title": metadata.title if metadata and metadata.title else "",
+                "content": extracted,
+                "url": url,
+                "section": "unknown",
+                "date": metadata.date if metadata and metadata.date else "",
+                "author": metadata.author if metadata and metadata.author else None,
+                "tags": [],
+                "images": images,
+                "content_type": "article"
+            }
+            
+        except ImportError:
+            logger.debug("Trafilatura не установлен, пропускаем")
+            return None
+        except Exception as e:
+            logger.debug(f"Ошибка парсинга через Trafilatura: {e}")
+            return None
+    
+    async def _parse_with_readability(self, url: str) -> Optional[Dict[str, Any]]:
+        """Парсинг через Readability-lxml"""
+        try:
+            from readability import Document
+            
+            # Загружаем HTML
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
+            
+            # Парсинг через Readability
+            doc = Document(html)
+            title = doc.title()
+            content_html = doc.summary()
+            
+            if not content_html or len(content_html) < 100:
+                return None
+            
+            # Извлекаем текст из HTML
+            soup = BeautifulSoup(content_html, 'html.parser')
+            content = soup.get_text(separator='\n', strip=True)
+            
+            if not content or len(content) < 100:
+                return None
+            
+            # Извлекаем изображения
+            images = []
+            for img in soup.find_all('img'):
+                img_url = img.get('src', '')
+                if img_url:
+                    if not img_url.startswith('http'):
+                        from urllib.parse import urljoin
+                        img_url = urljoin(url, img_url)
+                    images.append({
+                        "url": img_url,
+                        "alt": img.get('alt', ''),
+                        "title": img.get('title', '')
+                    })
+            
+            return {
+                "title": title,
+                "content": content,
+                "url": url,
+                "section": "unknown",
+                "date": "",
+                "author": None,
+                "tags": [],
+                "images": images,
+                "content_type": "article"
+            }
+            
+        except ImportError:
+            logger.debug("Readability-lxml не установлен, пропускаем")
+            return None
+        except Exception as e:
+            logger.debug(f"Ошибка парсинга через Readability: {e}")
+            return None
+    
+    async def _parse_with_beautifulsoup(self, url: str) -> Optional[Dict[str, Any]]:
+        """Парсинг через BeautifulSoup (fallback)"""
+        try:
+            # Загружаем HTML
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Извлекаем заголовок
+            title = ""
+            title_elem = soup.find('title')
+            if title_elem:
+                title = title_elem.get_text(strip=True)
+            
+            if not title:
+                h1 = soup.find('h1')
+                if h1:
+                    title = h1.get_text(strip=True)
+            
+            # Извлекаем основной контент
+            # Пробуем найти article, main, или div с контентом
+            content = ""
+            content_selectors = [
+                'article',
+                'main',
+                '[role="main"]',
+                '.content',
+                '.article-content',
+                '.post-content',
+                '.entry-content',
+                '#content',
+                '#main-content'
+            ]
+            
+            for selector in content_selectors:
+                elem = soup.select_one(selector)
+                if elem:
+                    # Удаляем ненужные элементы
+                    for unwanted in elem(["script", "style", "nav", "footer", "aside", "header"]):
+                        unwanted.decompose()
+                    
+                    content = elem.get_text(separator='\n', strip=True)
+                    if content and len(content) > 100:
+                        break
+            
+            if not content or len(content) < 100:
+                return None
+            
+            # Извлекаем изображения
+            images = []
+            for img in soup.find_all('img'):
+                img_url = img.get('src', '')
+                if img_url:
+                    if not img_url.startswith('http'):
+                        from urllib.parse import urljoin
+                        img_url = urljoin(url, img_url)
+                    images.append({
+                        "url": img_url,
+                        "alt": img.get('alt', ''),
+                        "title": img.get('title', '')
+                    })
+            
+            return {
+                "title": title or "Без названия",
+                "content": content,
+                "url": url,
+                "section": "unknown",
+                "date": "",
+                "author": None,
+                "tags": [],
+                "images": images,
+                "content_type": "article"
+            }
+            
+        except Exception as e:
+            logger.debug(f"Ошибка парсинга через BeautifulSoup: {e}")
             return None
     
     async def _detect_page_type(self, url: str) -> str:

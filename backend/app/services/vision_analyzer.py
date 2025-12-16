@@ -213,6 +213,48 @@ class VisionAnalyzer:
                 'error': f'Ошибка декодирования base64: {e}'
             }
     
+    def analyze_image_from_url(self, image_url: str, image_name: str = "image") -> Dict[str, Any]:
+        """
+        Анализ изображения из URL
+        
+        Args:
+            image_url: URL изображения
+            image_name: Имя изображения для контекста
+        
+        Returns:
+            Dict с результатами анализа
+        """
+        try:
+            # Скачиваем изображение
+            response = httpx.get(image_url, timeout=30, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            response.raise_for_status()
+            
+            image_data = response.content
+            
+            # Проверяем размер
+            if len(image_data) > 20 * 1024 * 1024:  # 20MB лимит
+                return {
+                    'success': False,
+                    'error': f'Изображение слишком большое: {len(image_data) / 1024 / 1024:.1f}MB'
+                }
+            
+            return self.analyze_image(image_data, image_name)
+            
+        except httpx.HTTPError as e:
+            logger.error(f"❌ Ошибка HTTP при скачивании изображения {image_url}: {e}")
+            return {
+                'success': False,
+                'error': f'Ошибка HTTP при скачивании изображения: {e}'
+            }
+        except Exception as e:
+            logger.error(f"❌ Ошибка анализа изображения из URL {image_url}: {e}")
+            return {
+                'success': False,
+                'error': f'Ошибка анализа изображения: {e}'
+            }
+    
     def check_relevance_to_3d_printing(self, image_analysis: str, image_name: str = "image") -> Dict[str, Any]:
         """
         Проверка релевантности изображения к теме 3D-печати
@@ -492,3 +534,5 @@ class VisionAnalyzer:
                 'error': f'Ошибка анализа через Ollama/llava: {e}',
                 'provider': 'ollama'
             }
+
+

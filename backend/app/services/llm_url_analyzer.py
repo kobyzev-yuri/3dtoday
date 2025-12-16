@@ -23,19 +23,27 @@ class LLMURLAnalyzer:
     LLM сам загружает контент и формирует JSON для KB
     """
     
-    def __init__(self, llm_provider: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, llm_provider: Optional[str] = None, model: Optional[str] = None, timeout: Optional[int] = None):
         """
         Инициализация анализатора
         
         Args:
             llm_provider: Провайдер LLM (openai, gemini)
             model: Модель для использования
+            timeout: Таймаут для LLM запросов в секундах (опционально)
         """
         self.llm_provider = llm_provider or os.getenv("LLM_PROVIDER", "openai").lower()
         self.model = model or self._get_default_model()
-        self.timeout = int(os.getenv("OPENAI_TIMEOUT", "120")) if self.llm_provider == "openai" else int(os.getenv("GEMINI_TIMEOUT", "120"))
         
-        logger.info(f"🔧 LLMURLAnalyzer инициализирован: provider={self.llm_provider}, model={self.model}")
+        # Используем переданный таймаут или значение из переменных окружения
+        if timeout is not None:
+            self.timeout = timeout
+        elif self.llm_provider == "openai":
+            self.timeout = int(os.getenv("OPENAI_TIMEOUT", "120"))
+        else:
+            self.timeout = int(os.getenv("GEMINI_TIMEOUT", "120"))
+        
+        logger.info(f"🔧 LLMURLAnalyzer инициализирован: provider={self.llm_provider}, model={self.model}, timeout={self.timeout}s")
     
     def _get_default_model(self) -> str:
         """Получение модели по умолчанию для провайдера"""

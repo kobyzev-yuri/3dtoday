@@ -162,3 +162,7 @@ python3 tools/test_admin_ui_functionality.py --url "https://3dtoday.ru/blogs/...
 
 - Подробнее о работе с KB: см. `docs/KB_MANAGEMENT.md`
 - Подробнее о тестировании: см. документацию в соответствующих скриптах
+
+
+
+

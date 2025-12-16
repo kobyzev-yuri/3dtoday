@@ -240,3 +240,5 @@ pip install trafilatura readability-lxml
 - `backend/requirements.txt` - зависимости
 - `tools/test_all_sources.py` - скрипт тестирования
 - `tools/TEST_RESULTS_SUMMARY.md` - результаты тестирования
+
+

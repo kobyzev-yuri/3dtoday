@@ -264,3 +264,7 @@ flowchart TD
 - Подробнее о работе агентов: см. исходный код в `backend/app/agents/`
 - Подробнее о сервисах: см. исходный код в `backend/app/services/`
 - Dataflow диаграммы: см. `DATAFLOW_DIAGRAM.md` (в archive/)
+
+
+
+
