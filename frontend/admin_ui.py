@@ -427,13 +427,29 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
                             else:
                                 error_detail = add_response.json().get('detail', add_response.text) if add_response.headers.get('content-type', '').startswith('application/json') else add_response.text
                                 st.error(f"❌ Ошибка добавления: {error_detail}")
-                                # Очищаем pending данные при ошибке
+                                
+                                # Проверяем, является ли ошибка связанной с дубликатом или уже существующей статьей
+                                error_lower = error_detail.lower()
+                                if "уже" in error_lower or "duplicate" in error_lower or "существует" in error_lower:
+                                    st.info("💡 Статья уже существует в KB. Вы можете продолжить загрузку других документов.")
+                                
+                                # Очищаем pending данные при ошибке, но НЕ останавливаем выполнение
                                 if "pending_add_parsed_document" in st.session_state:
                                     del st.session_state.pending_add_parsed_document
                                 if "pending_add_review" in st.session_state:
                                     del st.session_state.pending_add_review
                                 if "pending_add_admin_decision" in st.session_state:
                                     del st.session_state.pending_add_admin_decision
+                                
+                                # Добавляем кнопку для очистки формы и продолжения работы
+                                if st.button("🔄 Очистить и продолжить", use_container_width=True):
+                                    if "parsed_document" in st.session_state:
+                                        del st.session_state.parsed_document
+                                    if "review" in st.session_state:
+                                        del st.session_state.review
+                                    if "admin_decision" in st.session_state:
+                                        del st.session_state.admin_decision
+                                    st.rerun()
                 except httpx.TimeoutException as e:
                     st.error(f"⏱️ Превышено время ожидания ответа ({int(index_timeout)} секунд)")
                     st.warning("💡 Индексация статьи может занимать много времени из-за генерации эмбеддингов.")
@@ -966,13 +982,31 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                                                 else:
                                                     error_detail = add_response.json().get('detail', add_response.text) if add_response.headers.get('content-type', '').startswith('application/json') else add_response.text
                                                     st.error(f"❌ Ошибка добавления: {error_detail}")
-                                                    # Очищаем pending данные при ошибке
+                                                    
+                                                    # Проверяем, является ли ошибка связанной с дубликатом или уже существующей статьей
+                                                    error_lower = error_detail.lower()
+                                                    if "уже" in error_lower or "duplicate" in error_lower or "существует" in error_lower:
+                                                        st.info("💡 Статья уже существует в KB. Вы можете продолжить загрузку других документов.")
+                                                    
+                                                    # Очищаем pending данные при ошибке, но НЕ останавливаем выполнение
                                                     if "pending_add_parsed_document" in st.session_state:
                                                         del st.session_state.pending_add_parsed_document
                                                     if "pending_add_review" in st.session_state:
                                                         del st.session_state.pending_add_review
                                                     if "pending_add_admin_decision" in st.session_state:
                                                         del st.session_state.pending_add_admin_decision
+                                                    
+                                                    # Добавляем кнопку для очистки формы и продолжения работы
+                                                    if st.button("🔄 Очистить и продолжить", key="clear_and_continue_1", use_container_width=True):
+                                                        if "parsed_document" in st.session_state:
+                                                            del st.session_state.parsed_document
+                                                        if "review" in st.session_state:
+                                                            del st.session_state.review
+                                                        if "admin_decision" in st.session_state:
+                                                            del st.session_state.admin_decision
+                                                        if "document_source" in st.session_state:
+                                                            del st.session_state.document_source
+                                                        st.rerun()
                                     except httpx.TimeoutException as e:
                                         st.error(f"⏱️ Превышено время ожидания ответа ({int(index_timeout)} секунд)")
                                         st.warning("💡 Индексация статьи может занимать много времени из-за генерации эмбеддингов.")
@@ -1321,6 +1355,23 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                                             else:
                                                 error_detail = add_response.json().get('detail', add_response.text)
                                                 st.error(f"❌ Ошибка добавления: {error_detail}")
+                                                
+                                                # Проверяем, является ли ошибка связанной с дубликатом или уже существующей статьей
+                                                error_lower = error_detail.lower()
+                                                if "уже" in error_lower or "duplicate" in error_lower or "существует" in error_lower:
+                                                    st.info("💡 Статья уже существует в KB. Вы можете продолжить загрузку других документов.")
+                                                
+                                                # Добавляем кнопку для очистки формы и продолжения работы
+                                                if st.button("🔄 Очистить и продолжить", key="clear_and_continue_2", use_container_width=True):
+                                                    if "parsed_document" in st.session_state:
+                                                        del st.session_state.parsed_document
+                                                    if "review" in st.session_state:
+                                                        del st.session_state.review
+                                                    if "admin_decision" in st.session_state:
+                                                        del st.session_state.admin_decision
+                                                    if "document_source" in st.session_state:
+                                                        del st.session_state.document_source
+                                                    st.rerun()
                                     except Exception as e:
                                         st.error(f"❌ Ошибка подключения к API: {e}")
                             elif admin_decision == "reject":
@@ -1431,15 +1482,21 @@ elif input_method == "📝 Ручной ввод":
                         else:
                             error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
                             st.error(f"❌ Ошибка валидации: {error_detail}")
-                            st.stop()
+                            # Не останавливаем выполнение - позволяем пользователю попробовать снова
+                            validation = None
                 except httpx.TimeoutException:
                     st.error(f"❌ Таймаут запроса ({actual_timeout} сек). Увеличьте таймаут в настройках sidebar или попробуйте позже.")
                     st.info("💡 Увеличьте таймаут 'API запросы' и 'LLM генерация' в настройках sidebar (слева)")
-                    st.stop()
+                    # Не останавливаем выполнение - позволяем пользователю попробовать снова
+                    validation = None
                 except Exception as e:
                     st.error(f"❌ Ошибка подключения к API: {e}")
                     st.info("💡 Убедитесь, что FastAPI сервер запущен: `uvicorn backend.app.main:app --reload`")
-                    st.stop()
+                    # Не останавливаем выполнение - позволяем пользователю попробовать снова
+                    validation = None
+            
+            # Продолжаем только если валидация прошла успешно
+            if validation:
             
             # Отображение результатов валидации
             st.subheader("📊 Результаты валидации")
@@ -1545,6 +1602,16 @@ elif input_method == "📝 Ручной ввод":
                                 else:
                                     error_detail = response.json().get('detail', response.text)
                                     st.error(f"❌ Ошибка: {error_detail}")
+                                    
+                                    # Проверяем, является ли ошибка связанной с дубликатом или уже существующей статьей
+                                    error_lower = error_detail.lower()
+                                    if "уже" in error_lower or "duplicate" in error_lower or "существует" in error_lower:
+                                        st.info("💡 Статья уже существует в KB. Вы можете продолжить загрузку других документов.")
+                                    
+                                    # Добавляем кнопку для очистки формы и продолжения работы
+                                    if st.button("🔄 Очистить и продолжить", key="clear_and_continue_3", use_container_width=True):
+                                        # Очищаем форму для следующего документа
+                                        st.rerun()
                         except Exception as e:
                             st.error(f"❌ Ошибка подключения к API: {e}")
 
