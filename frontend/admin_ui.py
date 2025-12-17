@@ -665,6 +665,8 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                     f.write(uploaded_file.getbuffer())
                 
                 source = str(temp_file_path)
+                st.session_state.uploaded_file_path = source
+                st.session_state.uploaded_file_name = uploaded_file.name
                 st.success(f"✅ Файл загружен: {uploaded_file.name} ({uploaded_file.size} байт)")
                 
                 # Автоматически определяем тип источника
@@ -678,9 +680,14 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                     source_type = "html"
                 else:
                     source_type = "auto"
+                st.session_state.uploaded_source_type = source_type
             else:
                 source = None
                 source_type = "auto"
+                if "uploaded_file_path" in st.session_state:
+                    # Используем ранее загруженный файл
+                    source = st.session_state.uploaded_file_path
+                    source_type = st.session_state.get("uploaded_source_type", "auto")
         else:
             # Ввод URL или пути к файлу
             col1, col2 = st.columns(2)
