@@ -1638,15 +1638,122 @@ elif input_method == "📝 Ручной ввод":
                                 st.error(f"❌ Ошибка подключения к API: {e}")
 
 else:  # Импорт из JSON
-    st.info("📄 Импорт из JSON будет доступен в следующей версии")
+    st.subheader("📄 Импорт статьи из JSON")
+    st.info("💡 Вставьте JSON с данными статьи. Обязательные поля: `title`, `content`. Опциональные: `url`, `section`.")
+    
     json_input = st.text_area(
         "Вставьте JSON статьи",
-        height=200,
-        placeholder='{"title": "...", "content": "...", ...}'
+        height=300,
+        placeholder='{\n  "title": "Заголовок статьи",\n  "content": "Содержимое статьи...",\n  "url": "https://example.com/article",\n  "section": "Техничка"\n}',
+        help="JSON должен содержать объект с полями title (обязательно) и content (обязательно)"
     )
     
-    if st.button("📥 Импортировать из JSON"):
-        st.info("Функция импорта из JSON будет реализована позже")
+    col_json1, col_json2 = st.columns([1, 1])
+    
+    with col_json1:
+        if st.button("📥 Импортировать из JSON", type="primary", use_container_width=True):
+            if not json_input or not json_input.strip():
+                st.error("❌ Пожалуйста, вставьте JSON данные")
+            else:
+                try:
+                    # Парсинг JSON
+                    import json
+                    article_data = json.loads(json_input)
+                    
+                    # Валидация обязательных полей
+                    if not isinstance(article_data, dict):
+                        st.error("❌ JSON должен быть объектом (словарем)")
+                    elif "title" not in article_data or not article_data.get("title"):
+                        st.error("❌ Обязательное поле 'title' отсутствует или пусто")
+                    elif "content" not in article_data or not article_data.get("content"):
+                        st.error("❌ Обязательное поле 'content' отсутствует или пусто")
+                    else:
+                        # Подготовка данных для API
+                        api_data = {
+                            "title": str(article_data["title"]).strip(),
+                            "content": str(article_data["content"]).strip(),
+                            "url": article_data.get("url", "").strip() if article_data.get("url") else None,
+                            "section": article_data.get("section", "Техничка").strip() if article_data.get("section") else None
+                        }
+                        
+                        # Проверка что title и content не пустые после strip
+                        if not api_data["title"]:
+                            st.error("❌ Поле 'title' не может быть пустым")
+                        elif not api_data["content"]:
+                            st.error("❌ Поле 'content' не может быть пустым")
+                        else:
+                            # Отправка на валидацию и добавление
+                            with st.spinner("💾 Валидация и добавление статьи в KB..."):
+                                try:
+                                    api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", 300)
+                                    with httpx.Client(timeout=float(api_timeout)) as client:
+                                        response = client.post(
+                                            f"{API_BASE_URL}/api/kb/articles/add",
+                                            json=api_data,
+                                            timeout=float(api_timeout)
+                                        )
+                                        
+                                        if response.status_code == 200:
+                                            result = response.json()
+                                            if result.get("success"):
+                                                st.success(f"✅ Статья успешно добавлена в KB!")
+                                                st.info(f"📝 Article ID: {result.get('article_id', 'N/A')}")
+                                                
+                                                # Показываем метаданные если есть
+                                                if result.get("metadata"):
+                                                    with st.expander("📊 Извлеченные метаданные"):
+                                                        metadata = result["metadata"]
+                                                        st.write(f"**Тип проблемы:** {metadata.get('problem_type', 'N/A')}")
+                                                        st.write(f"**Принтеры:** {', '.join(metadata.get('printer_models', [])) or 'не указаны'}")
+                                                        st.write(f"**Материалы:** {', '.join(metadata.get('materials', [])) or 'не указаны'}")
+                                                        st.write(f"**Симптомы:** {', '.join(metadata.get('symptoms', [])) or 'не указаны'}")
+                                                        st.write(f"**Решения:** {len(metadata.get('solutions', []))} найдено")
+                                                
+                                                # Очистка поля ввода
+                                                st.session_state.json_input_cleared = True
+                                                st.rerun()
+                                            else:
+                                                st.error(f"❌ Ошибка добавления: {result.get('error', 'Unknown error')}")
+                                        else:
+                                            error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                                            st.error(f"❌ Ошибка API ({response.status_code}): {error_detail}")
+                                            
+                                            # Проверка на дубликат
+                                            error_lower = str(error_detail).lower()
+                                            if "уже" in error_lower or "duplicate" in error_lower or "существует" in error_lower:
+                                                st.info("💡 Статья уже существует в KB. Вы можете продолжить импорт других документов.")
+                                            
+                                            # Кнопка для очистки и продолжения
+                                            if st.button("🔄 Очистить и продолжить", key="clear_json_continue", use_container_width=True):
+                                                st.session_state.json_input_cleared = True
+                                                st.rerun()
+                                except httpx.TimeoutException:
+                                    st.error(f"⏱️ Превышено время ожидания ответа ({int(api_timeout)} секунд)")
+                                    st.warning("💡 Валидация и индексация статьи могут занимать много времени.")
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка подключения к API: {e}")
+                                    st.info("💡 Убедитесь, что FastAPI сервер запущен")
+                
+                except json.JSONDecodeError as e:
+                    st.error(f"❌ Ошибка парсинга JSON: {e}")
+                    st.info("💡 Убедитесь, что JSON валиден. Можно проверить на https://jsonlint.com/")
+                except Exception as e:
+                    st.error(f"❌ Неожиданная ошибка: {e}")
+    
+    with col_json2:
+        if st.button("📋 Пример JSON", use_container_width=True):
+            example_json = {
+                "title": "Проблема с адгезией первого слоя",
+                "content": "При печати на Ender-3 с PLA материалом первый слой не прилипает к столу. Это может быть связано с неправильной высотой сопла, температурой стола или настройками скорости печати.",
+                "url": "https://example.com/bed-adhesion",
+                "section": "Техничка"
+            }
+            st.code(json.dumps(example_json, ensure_ascii=False, indent=2), language="json")
+    
+    # Очистка поля ввода после успешного добавления
+    if st.session_state.get("json_input_cleared"):
+        json_input = ""
+        del st.session_state.json_input_cleared
 
 # Обработка добавления распарсенного документа
 if st.session_state.get("use_parsed_document") and st.session_state.get("parsed_document"):
