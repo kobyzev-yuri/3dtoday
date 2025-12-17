@@ -1520,123 +1520,122 @@ elif input_method == "📝 Ручной ввод":
             
             # Продолжаем только если валидация прошла успешно
             if validation:
-            
-            # Отображение результатов валидации
-            st.subheader("📊 Результаты валидации")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                relevance_score = validation.get('relevance_score', 0)
-                st.metric(
-                    "Релевантность",
-                    f"{relevance_score:.2f}",
-                    delta=f"{relevance_score - 0.7:.2f}" if relevance_score >= 0.7 else None,
-                    delta_color="normal" if relevance_score >= 0.7 else "inverse"
-                )
-            
-            with col2:
-                quality_score = validation.get('quality_score', 0)
-                st.metric(
-                    "Качество",
-                    f"{quality_score:.2f}",
-                    delta=f"{quality_score - 0.6:.2f}" if quality_score >= 0.6 else None,
-                    delta_color="normal" if quality_score >= 0.6 else "inverse"
-                )
-            
-            with col3:
-                has_solutions = validation.get('has_solutions', False)
-                st.metric(
-                    "Есть решения",
-                    "✅ Да" if has_solutions else "❌ Нет"
-                )
-            
-            # Статус релевантности
-            is_relevant = validation.get('is_relevant', False)
-            if is_relevant:
-                st.success("✅ Статья релевантна и может быть добавлена в KB")
-            else:
-                st.warning("⚠️ Статья не релевантна. Проверьте критерии ниже.")
-            
-            # Проблемы и рекомендации
-            if validation.get('issues'):
-                with st.expander("⚠️ Обнаруженные проблемы"):
-                    for issue in validation['issues']:
-                        st.write(f"- {issue}")
-            
-            if validation.get('recommendations'):
-                with st.expander("💡 Рекомендации"):
-                    for rec in validation['recommendations']:
-                        st.write(f"- {rec}")
-            
-            # Извлеченные метаданные
-            metadata = validation.get('metadata')
-            if metadata:
-                st.subheader("📝 Извлеченные метаданные")
+                # Отображение результатов валидации
+                st.subheader("📊 Результаты валидации")
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    st.write("**Тип проблемы:**", metadata.get('problem_type') or "не определен")
-                    st.write("**Принтеры:**", ', '.join(metadata.get('printer_models', [])) or "не указаны")
-                    st.write("**Материалы:**", ', '.join(metadata.get('materials', [])) or "не указаны")
+                    relevance_score = validation.get('relevance_score', 0)
+                    st.metric(
+                        "Релевантность",
+                        f"{relevance_score:.2f}",
+                        delta=f"{relevance_score - 0.7:.2f}" if relevance_score >= 0.7 else None,
+                        delta_color="normal" if relevance_score >= 0.7 else "inverse"
+                    )
                 
                 with col2:
-                    st.write("**Симптомы:**", ', '.join(metadata.get('symptoms', [])) or "не указаны")
-                    st.write("**Количество решений:**", len(metadata.get('solutions', [])))
+                    quality_score = validation.get('quality_score', 0)
+                    st.metric(
+                        "Качество",
+                        f"{quality_score:.2f}",
+                        delta=f"{quality_score - 0.6:.2f}" if quality_score >= 0.6 else None,
+                        delta_color="normal" if quality_score >= 0.6 else "inverse"
+                    )
                 
-                # Отображение решений
-                if metadata.get('solutions'):
-                    with st.expander("🔧 Извлеченные решения"):
-                        for i, solution in enumerate(metadata['solutions'], 1):
-                            st.write(f"**Решение {i}:**")
-                            st.write(f"- Параметр: {solution.get('parameter', 'N/A')}")
-                            st.write(f"- Значение: {solution.get('value', 'N/A')} {solution.get('unit', '')}")
-                            st.write(f"- Описание: {solution.get('description', 'N/A')}")
-                            st.write("---")
-            
-            # Подтверждение и добавление
-            if is_relevant:
-                st.markdown("---")
+                with col3:
+                    has_solutions = validation.get('has_solutions', False)
+                    st.metric(
+                        "Есть решения",
+                        "✅ Да" if has_solutions else "❌ Нет"
+                    )
                 
-                if st.button("💾 Добавить статью в KB", type="primary", use_container_width=True):
-                    with st.spinner("💾 Индексация статьи..."):
-                        try:
-                            with httpx.Client(timeout=120.0) as client:
-                                response = client.post(
-                                    f"{API_BASE_URL}/api/kb/articles/add",
-                                    json={
-                                        "title": title,
-                                        "content": content,
-                                        "url": url if url else None,
-                                        "section": section
-                                    }
-                                )
-                                
-                                if response.status_code == 200:
-                                    result = response.json()
-                                    # Сохраняем статус успеха перед rerun
-                                    st.session_state.add_success_status = {
-                                        "message": "Статья успешно добавлена в KB!",
-                                        "article_id": result.get('article_id')
-                                    }
-                                    # Очистка формы через rerun
-                                    st.rerun()
-                                else:
-                                    error_detail = response.json().get('detail', response.text)
-                                    st.error(f"❌ Ошибка: {error_detail}")
+                # Статус релевантности
+                is_relevant = validation.get('is_relevant', False)
+                if is_relevant:
+                    st.success("✅ Статья релевантна и может быть добавлена в KB")
+                else:
+                    st.warning("⚠️ Статья не релевантна. Проверьте критерии ниже.")
+                
+                # Проблемы и рекомендации
+                if validation.get('issues'):
+                    with st.expander("⚠️ Обнаруженные проблемы"):
+                        for issue in validation['issues']:
+                            st.write(f"- {issue}")
+                
+                if validation.get('recommendations'):
+                    with st.expander("💡 Рекомендации"):
+                        for rec in validation['recommendations']:
+                            st.write(f"- {rec}")
+                
+                # Извлеченные метаданные
+                metadata = validation.get('metadata')
+                if metadata:
+                    st.subheader("📝 Извлеченные метаданные")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Тип проблемы:**", metadata.get('problem_type') or "не определен")
+                        st.write("**Принтеры:**", ', '.join(metadata.get('printer_models', [])) or "не указаны")
+                        st.write("**Материалы:**", ', '.join(metadata.get('materials', [])) or "не указаны")
+                    
+                    with col2:
+                        st.write("**Симптомы:**", ', '.join(metadata.get('symptoms', [])) or "не указаны")
+                        st.write("**Количество решений:**", len(metadata.get('solutions', [])))
+                    
+                    # Отображение решений
+                    if metadata.get('solutions'):
+                        with st.expander("🔧 Извлеченные решения"):
+                            for i, solution in enumerate(metadata['solutions'], 1):
+                                st.write(f"**Решение {i}:**")
+                                st.write(f"- Параметр: {solution.get('parameter', 'N/A')}")
+                                st.write(f"- Значение: {solution.get('value', 'N/A')} {solution.get('unit', '')}")
+                                st.write(f"- Описание: {solution.get('description', 'N/A')}")
+                                st.write("---")
+                
+                # Подтверждение и добавление
+                if is_relevant:
+                    st.markdown("---")
+                    
+                    if st.button("💾 Добавить статью в KB", type="primary", use_container_width=True):
+                        with st.spinner("💾 Индексация статьи..."):
+                            try:
+                                with httpx.Client(timeout=120.0) as client:
+                                    response = client.post(
+                                        f"{API_BASE_URL}/api/kb/articles/add",
+                                        json={
+                                            "title": title,
+                                            "content": content,
+                                            "url": url if url else None,
+                                            "section": section
+                                        }
+                                    )
                                     
-                                    # Проверяем, является ли ошибка связанной с дубликатом или уже существующей статьей
-                                    error_lower = error_detail.lower()
-                                    if "уже" in error_lower or "duplicate" in error_lower or "существует" in error_lower:
-                                        st.info("💡 Статья уже существует в KB. Вы можете продолжить загрузку других документов.")
-                                    
-                                    # Добавляем кнопку для очистки формы и продолжения работы
-                                    if st.button("🔄 Очистить и продолжить", key="clear_and_continue_3", use_container_width=True):
-                                        # Очищаем форму для следующего документа
+                                    if response.status_code == 200:
+                                        result = response.json()
+                                        # Сохраняем статус успеха перед rerun
+                                        st.session_state.add_success_status = {
+                                            "message": "Статья успешно добавлена в KB!",
+                                            "article_id": result.get('article_id')
+                                        }
+                                        # Очистка формы через rerun
                                         st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Ошибка подключения к API: {e}")
+                                    else:
+                                        error_detail = response.json().get('detail', response.text)
+                                        st.error(f"❌ Ошибка: {error_detail}")
+                                        
+                                        # Проверяем, является ли ошибка связанной с дубликатом или уже существующей статьей
+                                        error_lower = error_detail.lower()
+                                        if "уже" in error_lower or "duplicate" in error_lower or "существует" in error_lower:
+                                            st.info("💡 Статья уже существует в KB. Вы можете продолжить загрузку других документов.")
+                                        
+                                        # Добавляем кнопку для очистки формы и продолжения работы
+                                        if st.button("🔄 Очистить и продолжить", key="clear_and_continue_3", use_container_width=True):
+                                            # Очищаем форму для следующего документа
+                                            st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Ошибка подключения к API: {e}")
 
 else:  # Импорт из JSON
     st.info("📄 Импорт из JSON будет доступен в следующей версии")
