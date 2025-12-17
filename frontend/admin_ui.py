@@ -262,18 +262,22 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
     sidebar_provider = st.session_state.get("llm_provider", "ollama")
     sidebar_model = st.session_state.get("selected_model", "qwen2.5:1.5b")
     
-    # Определяем поддерживаемые провайдеры для LLM парсинга
-    # Примечание: Ollama может не поддерживать tool calls, поэтому для LLM парсинга лучше использовать OpenAI/Gemini
-    available_providers = ["openai", "gemini"]
+    # Предупреждение, если выбран Ollama (может не поддерживать tool calls)
     if sidebar_provider == "ollama":
-        st.info(f"📋 В sidebar выбран Ollama, но для LLM парсинга рекомендуется использовать OpenAI или Gemini (Ollama может не поддерживать tool calls)")
-        # Если выбран Ollama, предлагаем OpenAI или Gemini
+        st.warning("⚠️ **Внимание**: В sidebar выбран Ollama. Для LLM парсинга (требуются tool calls) рекомендуется использовать OpenAI или Gemini. Измените провайдер в sidebar или используйте метод 'По URL/Файлу (автоматический парсинг)' для Ollama.")
+    
+    # Определяем доступные провайдеры для LLM парсинга
+    # Для LLM парсинга лучше использовать OpenAI/Gemini (поддерживают tool calls)
+    available_providers = ["openai", "gemini"]
+    
+    # Если в sidebar выбран OpenAI или Gemini - используем его, иначе OpenAI по умолчанию
+    if sidebar_provider in available_providers:
+        default_provider = sidebar_provider
+        default_provider_index = available_providers.index(default_provider)
+    else:
+        # Если Ollama - предлагаем OpenAI
         default_provider = "openai"
         default_provider_index = 0
-    else:
-        # Используем провайдер из sidebar
-        default_provider = sidebar_provider if sidebar_provider in available_providers else "openai"
-        default_provider_index = available_providers.index(default_provider) if default_provider in available_providers else 0
     
     with st.form("llm_url_form"):
         source = st.text_input(
@@ -288,7 +292,7 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
                 "LLM провайдер:",
                 available_providers,
                 index=default_provider_index,
-                help=f"Рекомендуется: OpenAI или Gemini (для tool calls). В sidebar выбран: {sidebar_provider}"
+                help=f"Используется из sidebar: {sidebar_provider}. Для LLM парсинга рекомендуется OpenAI или Gemini."
             )
         with col2:
             if llm_provider_choice == "openai":
