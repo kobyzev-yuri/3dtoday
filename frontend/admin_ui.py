@@ -55,8 +55,8 @@ with tab1:
         if "pending_add_admin_decision" in st.session_state:
             del st.session_state.pending_add_admin_decision
 
-    # Боковая панель
-    with st.sidebar:
+# Боковая панель (вне вкладок, всегда видна)
+with st.sidebar:
     st.header("⚙️ Настройки")
     
     # Инициализация session state для настроек
