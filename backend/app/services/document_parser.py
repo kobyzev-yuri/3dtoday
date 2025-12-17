@@ -152,6 +152,95 @@ class DocumentParser:
             logger.error(f"❌ Ошибка обработки JSON: {e}")
             return None
     
+    async def _parse_txt(self, source: str) -> Optional[Dict[str, Any]]:
+        """
+        Парсинг TXT файла
+        
+        Args:
+            source: Путь к TXT файлу
+        
+        Returns:
+            Словарь с данными документа или None при ошибке
+        """
+        try:
+            path = Path(source)
+            if not path.exists():
+                logger.error(f"❌ Файл не найден: {source}")
+                return None
+            
+            logger.info(f"📄 Чтение TXT файла: {source}")
+            
+            # Чтение файла с определением кодировки
+            try:
+                # Пробуем UTF-8
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                # Если не UTF-8, пробуем другие кодировки
+                try:
+                    with open(path, 'r', encoding='cp1251') as f:
+                        content = f.read()
+                except UnicodeDecodeError:
+                    with open(path, 'r', encoding='latin-1') as f:
+                        content = f.read()
+            
+            if not content or len(content.strip()) < 10:
+                logger.warning(f"⚠️ TXT файл пуст или слишком короткий: {source}")
+                return {
+                    "title": path.stem,
+                    "content": content.strip() if content else "",
+                    "url": str(path),
+                    "section": "unknown",
+                    "date": "",
+                    "images": [],
+                    "content_type": "article",
+                    "error": "Файл пуст или слишком короткий"
+                }
+            
+            # Попытка извлечь заголовок из первой строки
+            lines = content.strip().split('\n')
+            title = ""
+            content_start = 0
+            
+            # Ищем заголовок (обычно в первой строке или после "Заголовок:")
+            for i, line in enumerate(lines[:5]):
+                line = line.strip()
+                if line.startswith("Заголовок:") or line.startswith("Title:"):
+                    title = line.split(":", 1)[1].strip()
+                    content_start = i + 1
+                    break
+                elif i == 0 and len(line) > 5 and len(line) < 200:
+                    # Первая строка может быть заголовком
+                    title = line
+                    content_start = 1
+                    break
+            
+            # Если заголовок не найден, используем имя файла
+            if not title:
+                title = path.stem.replace('_', ' ').replace('-', ' ')
+            
+            # Остальной контент
+            if content_start > 0:
+                content_text = '\n'.join(lines[content_start:]).strip()
+            else:
+                content_text = content.strip()
+            
+            logger.info(f"✅ TXT файл прочитан: {len(content_text)} символов, заголовок: {title}")
+            
+            return {
+                "title": title,
+                "content": content_text,
+                "url": str(path),
+                "section": "unknown",
+                "date": "",
+                "images": [],
+                "content_type": "article"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка парсинга TXT: {e}", exc_info=True)
+            return None
+    
     async def _parse_pdf(self, source: str, max_pages: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Парсинг PDF документа
