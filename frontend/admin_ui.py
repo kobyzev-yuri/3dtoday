@@ -7,6 +7,7 @@ import streamlit as st
 import httpx
 import asyncio
 import os
+import json
 from typing import Optional, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
@@ -1657,7 +1658,6 @@ else:  # Импорт из JSON
             else:
                 try:
                     # Парсинг JSON
-                    import json
                     article_data = json.loads(json_input)
                     
                     # Валидация обязательных полей
