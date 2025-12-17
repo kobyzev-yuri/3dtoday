@@ -1642,11 +1642,35 @@ else:  # Импорт из JSON
     st.subheader("📄 Импорт статьи из JSON")
     st.info("💡 Вставьте JSON с данными статьи. Обязательные поля: `title`, `content`. Опциональные: `url`, `section`.")
     
+    # Показываем статус успешного добавления если есть
+    if st.session_state.get("json_import_success"):
+        success_info = st.session_state.json_import_success
+        st.success(f"✅ {success_info.get('message', 'Статья успешно добавлена в KB!')}")
+        st.info(f"📝 Article ID: {success_info.get('article_id', 'N/A')}")
+        
+        # Показываем метаданные если есть
+        if success_info.get("metadata"):
+            with st.expander("📊 Извлеченные метаданные"):
+                metadata = success_info["metadata"]
+                st.write(f"**Тип проблемы:** {metadata.get('problem_type', 'N/A')}")
+                st.write(f"**Принтеры:** {', '.join(metadata.get('printer_models', [])) or 'не указаны'}")
+                st.write(f"**Материалы:** {', '.join(metadata.get('materials', [])) or 'не указаны'}")
+                st.write(f"**Симптомы:** {', '.join(metadata.get('symptoms', [])) or 'не указаны'}")
+                st.write(f"**Решения:** {len(metadata.get('solutions', []))} найдено")
+        
+        # Кнопка для очистки статуса и продолжения
+        if st.button("🔄 Очистить и импортировать следующую", type="primary", use_container_width=True, key="clear_json_success"):
+            del st.session_state.json_import_success
+            if "json_input_cleared" in st.session_state:
+                del st.session_state.json_input_cleared
+            st.rerun()
+    
     json_input = st.text_area(
         "Вставьте JSON статьи",
         height=300,
         placeholder='{\n  "title": "Заголовок статьи",\n  "content": "Содержимое статьи...",\n  "url": "https://example.com/article",\n  "section": "Техничка"\n}',
-        help="JSON должен содержать объект с полями title (обязательно) и content (обязательно)"
+        help="JSON должен содержать объект с полями title (обязательно) и content (обязательно)",
+        value="" if st.session_state.get("json_input_cleared") else None
     )
     
     col_json1, col_json2 = st.columns([1, 1])
@@ -1696,27 +1720,23 @@ else:  # Импорт из JSON
                                         if response.status_code == 200:
                                             result = response.json()
                                             if result.get("success"):
-                                                st.success(f"✅ Статья успешно добавлена в KB!")
-                                                st.info(f"📝 Article ID: {result.get('article_id', 'N/A')}")
-                                                
-                                                # Показываем метаданные если есть
-                                                if result.get("metadata"):
-                                                    with st.expander("📊 Извлеченные метаданные"):
-                                                        metadata = result["metadata"]
-                                                        st.write(f"**Тип проблемы:** {metadata.get('problem_type', 'N/A')}")
-                                                        st.write(f"**Принтеры:** {', '.join(metadata.get('printer_models', [])) or 'не указаны'}")
-                                                        st.write(f"**Материалы:** {', '.join(metadata.get('materials', [])) or 'не указаны'}")
-                                                        st.write(f"**Симптомы:** {', '.join(metadata.get('symptoms', [])) or 'не указаны'}")
-                                                        st.write(f"**Решения:** {len(metadata.get('solutions', []))} найдено")
-                                                
+                                                # Сохраняем статус успеха в session_state
+                                                st.session_state.json_import_success = {
+                                                    "message": "Статья успешно добавлена в KB!",
+                                                    "article_id": result.get('article_id', 'N/A'),
+                                                    "metadata": result.get("metadata"),
+                                                    "validation": result.get("validation")
+                                                }
                                                 # Очистка поля ввода
                                                 st.session_state.json_input_cleared = True
                                                 st.rerun()
                                             else:
                                                 st.error(f"❌ Ошибка добавления: {result.get('error', 'Unknown error')}")
+                                                st.warning("💡 Статья не была добавлена в KB. Проверьте ошибку выше.")
                                         else:
                                             error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
                                             st.error(f"❌ Ошибка API ({response.status_code}): {error_detail}")
+                                            st.warning("💡 Статья не была добавлена в KB из-за ошибки.")
                                             
                                             # Проверка на дубликат
                                             error_lower = str(error_detail).lower()
@@ -1730,8 +1750,10 @@ else:  # Импорт из JSON
                                 except httpx.TimeoutException:
                                     st.error(f"⏱️ Превышено время ожидания ответа ({int(api_timeout)} секунд)")
                                     st.warning("💡 Валидация и индексация статьи могут занимать много времени.")
+                                    st.error("❌ Статья не была добавлена в KB из-за таймаута.")
                                 except Exception as e:
                                     st.error(f"❌ Ошибка подключения к API: {e}")
+                                    st.warning("💡 Статья не была добавлена в KB из-за ошибки подключения.")
                                     st.info("💡 Убедитесь, что FastAPI сервер запущен")
                 
                 except json.JSONDecodeError as e:
@@ -1750,10 +1772,7 @@ else:  # Импорт из JSON
             }
             st.code(json.dumps(example_json, ensure_ascii=False, indent=2), language="json")
     
-    # Очистка поля ввода после успешного добавления
-    if st.session_state.get("json_input_cleared"):
-        json_input = ""
-        del st.session_state.json_input_cleared
+    # Очистка поля ввода после успешного добавления (выполняется через rerun)
 
 # Обработка добавления распарсенного документа
 if st.session_state.get("use_parsed_document") and st.session_state.get("parsed_document"):
