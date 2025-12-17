@@ -632,23 +632,73 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
 
 elif input_method == "🔗 По URL/Файлу (автоматический парсинг)":
     # Парсинг по URL или файлу
+    st.info("💡 Поддерживаются: HTML/URL, PDF документы, TXT файлы, JSON файлы")
+    
+    # Выбор способа ввода: URL или файл
+    input_type = st.radio(
+        "Способ ввода:",
+        ["📎 Загрузить файл", "🔗 Ввести URL/путь"],
+        horizontal=True
+    )
+    
     with st.form("url_form", clear_on_submit=False):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            source = st.text_input(
-                "URL или путь к файлу *",
-                placeholder="https://3dtoday.ru/... или /path/to/file.pdf"
+        if input_type == "📎 Загрузить файл":
+            uploaded_file = st.file_uploader(
+                "Загрузите файл",
+                type=["pdf", "txt", "json", "html"],
+                help="Перетащите файл сюда или нажмите для выбора. Поддерживаются: PDF, TXT, JSON, HTML"
             )
-        
-        with col2:
-            source_type = st.selectbox(
-                "Тип источника (автоопределение если не указан)",
-                ["auto", "html", "pdf", "json", "url"],
-                help="auto - автоматическое определение типа"
-            )
-        
-        st.info("💡 Поддерживаются: HTML/URL, PDF документы, JSON файлы")
+            
+            if uploaded_file:
+                # Сохраняем файл во временную директорию
+                import tempfile
+                import os
+                temp_dir = Path(tempfile.gettempdir()) / "kb_uploads"
+                temp_dir.mkdir(exist_ok=True)
+                
+                # Определяем расширение файла
+                file_ext = Path(uploaded_file.name).suffix.lower()
+                temp_file_path = temp_dir / f"{uploaded_file.name}"
+                
+                # Сохраняем файл
+                with open(temp_file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                source = str(temp_file_path)
+                st.success(f"✅ Файл загружен: {uploaded_file.name} ({uploaded_file.size} байт)")
+                
+                # Автоматически определяем тип источника
+                if file_ext == ".pdf":
+                    source_type = "pdf"
+                elif file_ext == ".txt":
+                    source_type = "html"  # TXT обрабатывается как текст
+                elif file_ext == ".json":
+                    source_type = "json"
+                elif file_ext == ".html":
+                    source_type = "html"
+                else:
+                    source_type = "auto"
+            else:
+                source = None
+                source_type = "auto"
+        else:
+            # Ввод URL или пути к файлу
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                source = st.text_input(
+                    "URL или путь к файлу *",
+                    placeholder="https://3dtoday.ru/... или /path/to/file.pdf"
+                )
+            
+            with col2:
+                source_type = st.selectbox(
+                    "Тип источника (автоопределение если не указан)",
+                    ["auto", "html", "pdf", "json", "url"],
+                    help="auto - автоматическое определение типа"
+                )
+            
+            uploaded_file = None
         
         submitted_url = st.form_submit_button("📥 Скачать и проанализировать документ", use_container_width=True)
     
@@ -1296,7 +1346,8 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
 
 elif input_method == "📝 Ручной ввод":
     # Ручной ввод (существующая форма)
-    with st.form("article_form", clear_on_submit=True):
+    # Не используем clear_on_submit, чтобы сохранить данные при ошибке
+    with st.form("article_form", clear_on_submit=False):
         col1, col2 = st.columns(2)
         
         with col1:
@@ -1325,24 +1376,55 @@ elif input_method == "📝 Ручной ввод":
             st.error("❌ Заполните обязательные поля: заголовок и содержимое")
         else:
             # Шаг 1: Валидация
-            with st.spinner("🔍 Проверка релевантности статьи..."):
+            # Используем таймаут из настроек sidebar
+            api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
+            llm_timeout = None
+            
+            # Определяем таймаут LLM в зависимости от провайдера
+            sidebar_provider = st.session_state.get("llm_provider", "ollama")
+            if sidebar_provider == "ollama":
+                llm_timeout = st.session_state.get("timeout_values", {}).get("LLM генерация (Ollama)", int(os.getenv("OLLAMA_TIMEOUT", "500")))
+            elif sidebar_provider == "openai":
+                llm_timeout = st.session_state.get("timeout_values", {}).get("LLM генерация (OpenAI)", int(os.getenv("OPENAI_TIMEOUT", "120")))
+            elif sidebar_provider == "gemini":
+                llm_timeout = st.session_state.get("timeout_values", {}).get("LLM генерация (OpenAI)", int(os.getenv("GEMINI_TIMEOUT", "120")))
+            
+            # Общий таймаут должен быть больше таймаута LLM + буфер
+            if llm_timeout:
+                actual_timeout = max(api_timeout, llm_timeout + 60)  # Буфер 60 секунд
+            else:
+                actual_timeout = max(api_timeout, 300)  # Минимум 300 секунд
+            
+            with st.spinner(f"🔍 Проверка релевантности статьи... (таймаут: {actual_timeout} сек)"):
                 try:
-                    with httpx.Client(timeout=60.0) as client:
+                    request_data = {
+                        "title": title,
+                        "content": content,
+                        "url": url if url else None,
+                        "section": section
+                    }
+                    
+                    # Добавляем таймаут LLM, если указан
+                    if llm_timeout:
+                        request_data["llm_timeout"] = llm_timeout
+                    
+                    with httpx.Client(timeout=float(actual_timeout)) as client:
                         response = client.post(
                             f"{API_BASE_URL}/api/kb/articles/validate",
-                            json={
-                                "title": title,
-                                "content": content,
-                                "url": url if url else None,
-                                "section": section
-                            }
+                            json=request_data,
+                            timeout=float(actual_timeout)
                         )
                         
                         if response.status_code == 200:
                             validation = response.json()
                         else:
-                            st.error(f"❌ Ошибка валидации: {response.text}")
+                            error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                            st.error(f"❌ Ошибка валидации: {error_detail}")
                             st.stop()
+                except httpx.TimeoutException:
+                    st.error(f"❌ Таймаут запроса ({actual_timeout} сек). Увеличьте таймаут в настройках sidebar или попробуйте позже.")
+                    st.info("💡 Увеличьте таймаут 'API запросы' и 'LLM генерация' в настройках sidebar (слева)")
+                    st.stop()
                 except Exception as e:
                     st.error(f"❌ Ошибка подключения к API: {e}")
                     st.info("💡 Убедитесь, что FastAPI сервер запущен: `uvicorn backend.app.main:app --reload`")
