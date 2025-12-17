@@ -673,7 +673,7 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                 if file_ext == ".pdf":
                     source_type = "pdf"
                 elif file_ext == ".txt":
-                    source_type = "html"  # TXT обрабатывается как текст
+                    source_type = "txt"  # TXT файлы обрабатываются специальным парсером
                 elif file_ext == ".json":
                     source_type = "json"
                 elif file_ext == ".html":
