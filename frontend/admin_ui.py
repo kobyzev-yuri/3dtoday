@@ -257,7 +257,11 @@ st.markdown("---")
 if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
     # Парсинг через LLM напрямую
     st.info("💡 **Новый метод**: LLM сам загружает контент и формирует JSON для KB")
-    st.info("📋 Поддерживается: GPT-4o (OpenAI/ProxyAPI) и Gemini 3")
+    st.info("📋 Поддерживается: GPT-4o (OpenAI/ProxyAPI), Gemini 3 и Ollama")
+    
+    # Используем провайдер из sidebar, но позволяем переопределить
+    sidebar_provider = st.session_state.get("llm_provider", "ollama")
+    sidebar_model = st.session_state.get("selected_model", "qwen2.5:1.5b")
     
     with st.form("llm_url_form"):
         source = st.text_input(
@@ -266,26 +270,59 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
             help="LLM сам загрузит и проанализирует страницу"
         )
         
+        # Определяем доступные провайдеры для LLM парсинга
+        # Ollama может быть недоступен, поэтому проверяем
+        available_providers = []
+        if sidebar_provider == "ollama":
+            # Если выбран Ollama в sidebar, используем его, но добавляем fallback
+            available_providers = ["ollama", "openai", "gemini"]
+            default_provider_index = 0
+        elif sidebar_provider in ["openai", "gemini"]:
+            # Если выбран OpenAI или Gemini, используем их
+            available_providers = [sidebar_provider, "openai" if sidebar_provider != "openai" else "gemini", "ollama"]
+            default_provider_index = 0
+        else:
+            available_providers = ["openai", "gemini", "ollama"]
+            default_provider_index = 0
+        
         col1, col2 = st.columns(2)
         with col1:
+            # Определяем индекс выбранного провайдера
+            provider_index = 0
+            if sidebar_provider in available_providers:
+                provider_index = available_providers.index(sidebar_provider)
+            
             llm_provider_choice = st.selectbox(
                 "LLM провайдер:",
-                ["openai", "gemini"],
-                index=0,
-                help="GPT-4o или Gemini 3"
+                available_providers,
+                index=provider_index,
+                help=f"Используется провайдер из настроек: {sidebar_provider} (можно изменить)"
             )
         with col2:
             if llm_provider_choice == "openai":
+                openai_models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+                default_model = sidebar_model if sidebar_provider == "openai" and sidebar_model in openai_models else "gpt-4o"
+                model_index = openai_models.index(default_model) if default_model in openai_models else 0
                 model_choice = st.selectbox(
                     "Модель:",
-                    ["gpt-4o", "gpt-4-turbo"],
-                    index=0
+                    openai_models,
+                    index=model_index
                 )
-            else:
+            elif llm_provider_choice == "gemini":
+                gemini_models = ["gemini-3-pro-preview", "gemini-pro", "gemini-1.5-pro"]
+                default_model = sidebar_model if sidebar_provider == "gemini" and sidebar_model in gemini_models else "gemini-3-pro-preview"
+                model_index = gemini_models.index(default_model) if default_model in gemini_models else 0
                 model_choice = st.selectbox(
                     "Модель:",
-                    ["gemini-3-pro-preview", "gemini-pro"],
-                    index=0
+                    gemini_models,
+                    index=model_index
+                )
+            else:  # ollama
+                # Для Ollama используем модель из sidebar
+                model_choice = st.text_input(
+                    "Модель Ollama:",
+                    value=sidebar_model if sidebar_provider == "ollama" else "qwen2.5:1.5b",
+                    help="Модель из настроек sidebar (можно изменить)"
                 )
         
         submitted_llm = st.form_submit_button("🤖 Анализировать через LLM", type="primary", use_container_width=True)
