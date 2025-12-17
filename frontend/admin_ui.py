@@ -228,6 +228,10 @@ with st.sidebar:
 st.subheader("📝 Добавление статьи в KB")
 
 # Выбор способа ввода
+# Сохраняем выбранный метод ввода в session_state
+if "input_method" not in st.session_state:
+    st.session_state.input_method = "🤖 По URL (через LLM - GPT-4o/Gemini)"
+
 input_method = st.radio(
     "Способ добавления документа:",
     ["🔗 По URL/Файлу (автоматический парсинг)", "🤖 По URL (через LLM - GPT-4o/Gemini)", "📝 Ручной ввод", "📄 Импорт из JSON"],
@@ -1233,13 +1237,17 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                                                     "message": "Статья успешно добавлена в KB!",
                                                     "article_id": result.get('article_id', 'unknown')
                                                 }
-                                                # Очистка session state
+                                                # Очистка session state (но сохраняем input_method чтобы остаться на той же странице)
+                                                input_method = st.session_state.get("input_method", "")
                                                 if "parsed_document" in st.session_state:
                                                     del st.session_state.parsed_document
                                                 if "review" in st.session_state:
                                                     del st.session_state.review
                                                 if "admin_decision" in st.session_state:
                                                     del st.session_state.admin_decision
+                                                # Сохраняем метод ввода чтобы остаться на той же странице
+                                                if input_method:
+                                                    st.session_state.input_method = input_method
                                                 st.rerun()
                                             else:
                                                 error_detail = add_response.json().get('detail', add_response.text)
