@@ -33,10 +33,21 @@
    ./scripts/start_qdrant.sh
    ```
 
-3. **Импортируйте KB** (если есть скрипт импорта):
+3. **Импортируйте KB:**
    ```bash
+   # Импорт статей
    python scripts/import_kb.py knowledge_base/export/articles_YYYYMMDD_HHMMSS.json
+   
+   # Или с изображениями (если есть файл изображений)
+   python scripts/import_kb.py knowledge_base/export/articles_YYYYMMDD_HHMMSS.json knowledge_base/export/images_YYYYMMDD_HHMMSS.json
    ```
+   
+   **Примечание:** Скрипт автоматически:
+   - Проверит подключение к Qdrant
+   - Загрузит модель эмбеддингов (при первом запуске)
+   - Сгенерирует эмбеддинги для всех статей
+   - Индексирует статьи в Qdrant
+   - Покажет статистику импорта
 
 4. **Проверьте импорт:**
    ```bash
@@ -76,4 +87,5 @@ git push origin main
 - [KB_BACKUP_AND_RESTORE.md](KB_BACKUP_AND_RESTORE.md) - Полное руководство по резервному копированию
 - [KB_MANAGEMENT.md](KB_MANAGEMENT.md) - Управление KB
 - [KB_CREATION_FROM_SCRATCH.md](KB_CREATION_FROM_SCRATCH.md) - Создание KB с нуля
+
 
