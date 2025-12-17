@@ -67,6 +67,8 @@ class DocumentParser:
                 return await self._parse_json(source)
             elif source_type == "pdf":
                 return await self._parse_pdf(source, max_pages=max_pages)
+            elif source_type == "txt":
+                return await self._parse_txt(source)
             elif source_type == "html" or source_type == "url":
                 return await self._parse_html(source)
             else:
@@ -103,6 +105,8 @@ class DocumentParser:
                 return "json"
             elif source.lower().endswith(('.html', '.htm')):
                 return "html"
+            elif source.lower().endswith('.txt'):
+                return "txt"
         
         # По умолчанию считаем HTML/URL
         return "html"
