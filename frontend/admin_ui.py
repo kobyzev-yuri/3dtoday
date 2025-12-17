@@ -258,69 +258,29 @@ if input_method == "🤖 По URL (через LLM - GPT-4o/Gemini)":
     # Парсинг через LLM напрямую
     st.info("💡 **Новый метод**: LLM сам загружает контент и формирует JSON для KB")
     
-    # Используем провайдер из sidebar
+    # Используем провайдер из sidebar (без дублирования выбора)
     sidebar_provider = st.session_state.get("llm_provider", "ollama")
     sidebar_model = st.session_state.get("selected_model", "qwen2.5:1.5b")
     
     # Предупреждение, если выбран Ollama (может не поддерживать tool calls)
     if sidebar_provider == "ollama":
-        st.warning("⚠️ **Внимание**: В sidebar выбран Ollama. Для LLM парсинга (требуются tool calls) рекомендуется использовать OpenAI или Gemini. Измените провайдер в sidebar или используйте метод 'По URL/Файлу (автоматический парсинг)' для Ollama.")
-    
-    # Определяем доступные провайдеры для LLM парсинга
-    # Для LLM парсинга лучше использовать OpenAI/Gemini (поддерживают tool calls)
-    available_providers = ["openai", "gemini"]
-    
-    # Если в sidebar выбран OpenAI или Gemini - используем его, иначе OpenAI по умолчанию
-    if sidebar_provider in available_providers:
-        default_provider = sidebar_provider
-        default_provider_index = available_providers.index(default_provider)
+        st.warning("⚠️ **Внимание**: В sidebar выбран Ollama. Для LLM парсинга (требуются tool calls) рекомендуется использовать OpenAI или Gemini. Измените провайдер в sidebar (слева) или используйте метод '🔗 По URL/Файлу (автоматический парсинг)' для Ollama.")
+        # Для Ollama используем OpenAI как fallback
+        llm_provider_choice = "openai"
+        model_choice = "gpt-4o"
+        st.info(f"📋 Будет использован: **{llm_provider_choice.upper()}** ({model_choice}) - измените провайдер в sidebar для другого выбора")
     else:
-        # Если Ollama - предлагаем OpenAI
-        default_provider = "openai"
-        default_provider_index = 0
+        # Используем провайдер из sidebar напрямую
+        llm_provider_choice = sidebar_provider
+        model_choice = sidebar_model
+        st.info(f"📋 Используется провайдер из настроек (sidebar): **{llm_provider_choice.upper()}** ({model_choice})")
     
     with st.form("llm_url_form"):
         source = st.text_input(
             "URL документа",
             placeholder="https://3dtoday.ru/...",
-            help="LLM сам загрузит и проанализирует страницу"
+            help=f"Будет использован провайдер из sidebar: {sidebar_provider.upper()} ({sidebar_model})"
         )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            llm_provider_choice = st.selectbox(
-                "LLM провайдер:",
-                available_providers,
-                index=default_provider_index,
-                help=f"Используется из sidebar: {sidebar_provider}. Для LLM парсинга рекомендуется OpenAI или Gemini."
-            )
-        with col2:
-            if llm_provider_choice == "openai":
-                openai_models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
-                # Используем модель из sidebar, если провайдер совпадает
-                if sidebar_provider == "openai" and sidebar_model in openai_models:
-                    default_model = sidebar_model
-                else:
-                    default_model = "gpt-4o"
-                model_index = openai_models.index(default_model) if default_model in openai_models else 0
-                model_choice = st.selectbox(
-                    "Модель:",
-                    openai_models,
-                    index=model_index
-                )
-            else:  # gemini
-                gemini_models = ["gemini-3-pro-preview", "gemini-pro", "gemini-1.5-pro"]
-                # Используем модель из sidebar, если провайдер совпадает
-                if sidebar_provider == "gemini" and sidebar_model in gemini_models:
-                    default_model = sidebar_model
-                else:
-                    default_model = "gemini-3-pro-preview"
-                model_index = gemini_models.index(default_model) if default_model in gemini_models else 0
-                model_choice = st.selectbox(
-                    "Модель:",
-                    gemini_models,
-                    index=model_index
-                )
         
         submitted_llm = st.form_submit_button("🤖 Анализировать через LLM", type="primary", use_container_width=True)
     
