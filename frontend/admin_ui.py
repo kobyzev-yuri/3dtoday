@@ -1035,18 +1035,28 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                                             del st.session_state.pending_add_admin_decision
             elif admin_decision == "reject":
                 st.info("📋 Документ отклонен. Он не будет добавлен в KB.")
-                if st.button("🔄 Очистить форму", use_container_width=True):
-                    if "parsed_document" in st.session_state:
-                        del st.session_state.parsed_document
-                    if "review" in st.session_state:
-                        del st.session_state.review
-                    if "summary" in st.session_state:
-                        del st.session_state.summary
-                    if "document_source" in st.session_state:
-                        del st.session_state.document_source
-                    if "admin_decision" in st.session_state:
-                        del st.session_state.admin_decision
-                    st.rerun()
+                
+                col_reject1, col_reject2 = st.columns(2)
+                with col_reject1:
+                    if st.button("💾 Сохранить для проверки", use_container_width=True):
+                        st.info("💡 Документ сохранен в сессии. Вы можете вернуться к нему позже.")
+                
+                with col_reject2:
+                    if st.button("🔄 Очистить и загрузить следующий", type="primary", use_container_width=True, key="clear_next_2"):
+                        # Очищаем все данные для загрузки следующего документа
+                        if "parsed_document" in st.session_state:
+                            del st.session_state.parsed_document
+                        if "review" in st.session_state:
+                            del st.session_state.review
+                        if "summary" in st.session_state:
+                            del st.session_state.summary
+                        if "document_source" in st.session_state:
+                            del st.session_state.document_source
+                        if "admin_decision" in st.session_state:
+                            del st.session_state.admin_decision
+                        if "uploaded_file_path" in st.session_state:
+                            del st.session_state.uploaded_file_path
+                        st.rerun()
             else:  # needs_review
                 st.warning("⚠️ Требуется дополнительная проверка перед добавлением в KB")
                 if st.button("💾 Сохранить для проверки", use_container_width=True):
@@ -1377,14 +1387,26 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                                         st.error(f"❌ Ошибка подключения к API: {e}")
                             elif admin_decision == "reject":
                                 st.info("📋 Документ отклонен. Он не будет добавлен в KB.")
-                                if st.button("🔄 Очистить форму", use_container_width=True):
-                                    if "parsed_document" in st.session_state:
-                                        del st.session_state.parsed_document
-                                    if "review" in st.session_state:
-                                        del st.session_state.review
-                                    if "admin_decision" in st.session_state:
-                                        del st.session_state.admin_decision
-                                    st.rerun()
+                                
+                                col_reject1, col_reject2 = st.columns(2)
+                                with col_reject1:
+                                    if st.button("💾 Сохранить для проверки", use_container_width=True, key="save_review_1"):
+                                        st.info("💡 Документ сохранен в сессии. Вы можете вернуться к нему позже.")
+                                
+                                with col_reject2:
+                                    if st.button("🔄 Очистить и загрузить следующий", type="primary", use_container_width=True, key="clear_next_3"):
+                                        # Очищаем все данные для загрузки следующего документа
+                                        if "parsed_document" in st.session_state:
+                                            del st.session_state.parsed_document
+                                        if "review" in st.session_state:
+                                            del st.session_state.review
+                                        if "admin_decision" in st.session_state:
+                                            del st.session_state.admin_decision
+                                        if "document_source" in st.session_state:
+                                            del st.session_state.document_source
+                                        if "uploaded_file_path" in st.session_state:
+                                            del st.session_state.uploaded_file_path
+                                        st.rerun()
                             else:  # needs_review
                                 st.warning("⚠️ Требуется дополнительная проверка перед добавлением в KB")
                                 if st.button("💾 Сохранить для проверки", use_container_width=True):
