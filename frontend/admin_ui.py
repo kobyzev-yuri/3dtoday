@@ -1031,7 +1031,11 @@ elif input_method == "🔗 По URL/Файлу (автоматический п�
                     del st.session_state.admin_decision
                 st.rerun()
     
-    elif submitted_url and source:
+    elif submitted_url and (source or st.session_state.get("uploaded_file_path")):
+        # Используем загруженный файл, если есть
+        if not source and st.session_state.get("uploaded_file_path"):
+            source = st.session_state.uploaded_file_path
+            source_type = st.session_state.get("uploaded_source_type", "auto")
         api_timeout = st.session_state.get("timeout_values", {}).get("API запросы", int(os.getenv("API_REQUEST_TIMEOUT", "300")))
         mcp_timeout = st.session_state.get("timeout_values", {}).get("MCP сервер", int(os.getenv("MCP_SERVER_TIMEOUT", "300")))
         
