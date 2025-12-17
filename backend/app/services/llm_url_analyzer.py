@@ -220,11 +220,20 @@ URL: {url}
                         
                         # Повторный запрос с загруженным контентом
                         logger.debug(f"📤 Повторный запрос с загруженным контентом...")
+                        # Создаем новый список сообщений без tool calls для финального запроса
+                        final_messages = [
+                            messages[0],  # Системный промпт
+                            messages[1],  # Первый запрос пользователя
+                            {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [tool_call]
+                            },
+                            messages[-1]  # Результат функции
+                        ]
                         response = client.chat.completions.create(
                             model=self.model,
-                            messages=messages,
-                            tools=[fetch_url_function],
-                            tool_choice="none",  # Больше не нужны функции
+                            messages=final_messages,
                             temperature=0.2,
                             max_tokens=4000
                         )

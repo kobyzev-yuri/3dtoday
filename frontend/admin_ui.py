@@ -30,35 +30,33 @@ st.title("📚 Управление базой знаний")
 tab1, tab2 = st.tabs(["➕ Добавление статей", "🧪 Инструкция по тестированию"])
 
 with tab1:
-    st.markdown("---")
+    # Проверка статуса успешного добавления (после rerun)
+    if "add_success_status" in st.session_state:
+        success_info = st.session_state.add_success_status
+        st.success(f"✅ {success_info.get('message', 'Статья успешно добавлена в KB!')}")
+        if success_info.get('article_id'):
+            st.info(f"**ID статьи:** `{success_info['article_id']}`")
+        # Удаляем статус после отображения
+        del st.session_state.add_success_status
+        st.markdown("---")
 
-# Проверка статуса успешного добавления (после rerun)
-if "add_success_status" in st.session_state:
-    success_info = st.session_state.add_success_status
-    st.success(f"✅ {success_info.get('message', 'Статья успешно добавлена в KB!')}")
-    if success_info.get('article_id'):
-        st.info(f"**ID статьи:** `{success_info['article_id']}`")
-    # Удаляем статус после отображения
-    del st.session_state.add_success_status
-    st.markdown("---")
+    # Восстановление данных парсинга из pending (если были сохранены перед запросом)
+    if "pending_add_parsed_document" in st.session_state and "pending_add_review" in st.session_state:
+        # Восстанавливаем данные парсинга для повторной попытки
+        if "parsed_document" not in st.session_state:
+            st.session_state.parsed_document = st.session_state.pending_add_parsed_document
+        if "review" not in st.session_state:
+            st.session_state.review = st.session_state.pending_add_review
+        if "admin_decision" not in st.session_state and "pending_add_admin_decision" in st.session_state:
+            st.session_state.admin_decision = st.session_state.pending_add_admin_decision
+        # Очищаем pending данные после восстановления
+        del st.session_state.pending_add_parsed_document
+        del st.session_state.pending_add_review
+        if "pending_add_admin_decision" in st.session_state:
+            del st.session_state.pending_add_admin_decision
 
-# Восстановление данных парсинга из pending (если были сохранены перед запросом)
-if "pending_add_parsed_document" in st.session_state and "pending_add_review" in st.session_state:
-    # Восстанавливаем данные парсинга для повторной попытки
-    if "parsed_document" not in st.session_state:
-        st.session_state.parsed_document = st.session_state.pending_add_parsed_document
-    if "review" not in st.session_state:
-        st.session_state.review = st.session_state.pending_add_review
-    if "admin_decision" not in st.session_state and "pending_add_admin_decision" in st.session_state:
-        st.session_state.admin_decision = st.session_state.pending_add_admin_decision
-    # Очищаем pending данные после восстановления
-    del st.session_state.pending_add_parsed_document
-    del st.session_state.pending_add_review
-    if "pending_add_admin_decision" in st.session_state:
-        del st.session_state.pending_add_admin_decision
-
-# Боковая панель
-with st.sidebar:
+    # Боковая панель
+    with st.sidebar:
     st.header("⚙️ Настройки")
     
     # Инициализация session state для настроек
@@ -226,11 +224,11 @@ with st.sidebar:
         except Exception as e:
             st.error(f"❌ Ошибка: {e}")
     
-    st.markdown("---")
-    st.info("💡 Используйте форму ниже для добавления статей в KB")
+        st.markdown("---")
+        st.info("💡 Используйте форму ниже для добавления статей в KB")
 
-# Основной интерфейс
-st.subheader("📝 Добавление статьи в KB")
+    # Основной интерфейс
+    st.subheader("📝 Добавление статьи в KB")
 
 # Выбор способа ввода
 # Сохраняем выбранный метод ввода в session_state
@@ -1560,8 +1558,8 @@ if st.session_state.get("use_parsed_document") and st.session_state.get("parsed_
         except Exception as e:
             st.error(f"❌ Ошибка валидации: {e}")
 
-# Инструкция
-with st.expander("📖 Инструкция по использованию"):
+    # Инструкция
+    with st.expander("📖 Инструкция по использованию"):
     st.markdown("""
     ### Процесс добавления статьи:
     
