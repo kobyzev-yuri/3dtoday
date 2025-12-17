@@ -232,11 +232,22 @@ st.subheader("📝 Добавление статьи в KB")
 if "input_method" not in st.session_state:
     st.session_state.input_method = "🤖 По URL (через LLM - GPT-4o/Gemini)"
 
+# Определяем индекс выбранного метода
+default_index = 0
+if "input_method" in st.session_state:
+    methods = ["🔗 По URL/Файлу (автоматический парсинг)", "🤖 По URL (через LLM - GPT-4o/Gemini)", "📝 Ручной ввод", "📄 Импорт из JSON"]
+    if st.session_state.input_method in methods:
+        default_index = methods.index(st.session_state.input_method)
+
 input_method = st.radio(
     "Способ добавления документа:",
     ["🔗 По URL/Файлу (автоматический парсинг)", "🤖 По URL (через LLM - GPT-4o/Gemini)", "📝 Ручной ввод", "📄 Импорт из JSON"],
+    index=default_index,
     horizontal=True
 )
+
+# Сохраняем выбранный метод в session_state
+st.session_state.input_method = input_method
 
 st.markdown("---")
 
