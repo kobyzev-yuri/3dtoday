@@ -542,11 +542,15 @@ with st.form("diagnostic_form", clear_on_submit=False):
         upload_image = st.file_uploader(
             "Загрузить фото дефекта (опционально)",
             type=['png', 'jpg', 'jpeg'],
-            help="Загрузка изображений будет доступна после реализации Vision Agent"
+            help="Загрузите фото дефекта для автоматического анализа и улучшенного поиска решений"
         )
     
     with col2:
-        st.info("📸 Анализ изображений будет доступен в следующей версии")
+        if upload_image:
+            st.success(f"📸 Изображение загружено: {upload_image.name}")
+            st.image(upload_image, caption="Предпросмотр", width=200)
+        else:
+            st.info("💡 Загрузите фото дефекта для более точной диагностики")
     
     submitted = st.form_submit_button("🔍 Получить диагностику", use_container_width=True)
     
@@ -655,49 +659,141 @@ if submitted:
                 DIAGNOSTIC_TIMEOUT
             ))
         
-        with st.spinner(f"🔍 Анализ проблемы и поиск решений... (это может занять до {int(diagnostic_timeout)} секунд)"):
+        # Определяем, используем ли мы изображение
+        use_image = upload_image is not None
+        
+        spinner_text = "🔍 Анализ проблемы и поиск решений..."
+        if use_image:
+            spinner_text = "📸 Анализ изображения и поиск решений..."
+        
+        with st.spinner(f"{spinner_text} (это может занять до {int(diagnostic_timeout)} секунд)"):
             try:
                 with httpx.Client(timeout=diagnostic_timeout) as client:
-                    response = client.post(
-                        f"{API_BASE_URL}/api/diagnose",
-                        json=request_data,
-                        timeout=diagnostic_timeout
-                    )
-                    
-                    logger.debug(f"Response status: {response.status_code}")
-                    
-                    if response.status_code == 200:
-                        diagnostic = response.json()
-                        logger.info(f"Diagnostic received successfully. Answer length: {len(diagnostic.get('answer', ''))}")
-                        logger.debug(f"Diagnostic response: {json.dumps(diagnostic, ensure_ascii=False, indent=2)}")
-                    elif response.status_code == 503:
-                        # Сервис недоступен (LLM не запущен)
-                        error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
-                        logger.error(f"LLM service unavailable (503): {error_detail}")
-                        st.error(f"⚠️ **LLM сервис недоступен**")
-                        st.warning(error_detail)
-                        st.info("**💡 Решение:**")
-                        st.markdown("""
-                        **Если используете Ollama:**
-                        ```bash
-                        ollama serve
-                        ```
+                    if use_image:
+                        # Запрос с изображением через RetrievalAgent
+                        logger.info(f"Отправка запроса с изображением: {upload_image.name}")
                         
-                        **Если используете Gemini/OpenAI:**
-                        - Проверьте, что `GEMINI_API_KEY` или `OPENAI_API_KEY` установлены в `config.env`
-                        - Убедитесь, что провайдер доступен
+                        # Подготовка multipart/form-data для изображения
+                        files = {
+                            "image": (upload_image.name, upload_image.getvalue(), upload_image.type)
+                        }
                         
-                        **Изменить провайдер:**
-                        - Откройте `config.env`
-                        - Установите `LLM_PROVIDER=gemini` (или `openai`)
-                        - Перезапустите FastAPI сервер
-                        """)
-                        st.stop()
+                        # Подготовка истории диалога для передачи в API
+                        filtered_history = []
+                        for msg in st.session_state.conversation_history[:-1]:  # Без текущего запроса
+                            if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                                filtered_history.append({
+                                    "role": msg["role"],
+                                    "content": msg["content"]
+                                })
+                        
+                        # Сериализуем conversation_history в JSON строку для multipart/form-data
+                        conversation_history_json = json.dumps(filtered_history) if filtered_history else None
+                        
+                        data = {
+                            "query": query,
+                            "printer_model": st.session_state.user_context.get("printer_model"),
+                            "material": st.session_state.user_context.get("material"),
+                            "problem_type": st.session_state.user_context.get("problem_type"),
+                            "conversation_history": conversation_history_json,  # JSON строка
+                            "use_reranking": "true",  # Строка для form-data
+                            "limit": "5"  # Строка для form-data
+                        }
+                        
+                        response = client.post(
+                            f"{API_BASE_URL}/api/diagnose/image",
+                            files=files,
+                            data=data,
+                            timeout=diagnostic_timeout
+                        )
+                        
+                        logger.debug(f"Image diagnostic response status: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            image_result = response.json()
+                            logger.info(f"Image diagnostic received: {image_result.get('results_count', 0)} results")
+                            
+                            # Формируем ответ в формате DiagnosticResponse для совместимости
+                            results = image_result.get("relevant_articles", image_result.get("results", []))
+                            results_count = image_result.get("results_count", len(results))
+                            
+                            logger.info(f"Image diagnostic: results_count={results_count}, results type={type(results)}, results length={len(results) if isinstance(results, list) else 'N/A'}")
+                            if results:
+                                logger.debug(f"First result keys: {list(results[0].keys()) if isinstance(results, list) and results else 'N/A'}")
+                            
+                            diagnostic = {
+                                "answer": image_result.get("answer", image_result.get("message", f"Найдено {results_count} релевантных статей с учетом анализа изображения")),
+                                "relevant_articles": results,
+                                "confidence": image_result.get("confidence", 0.9 if results_count > 0 else 0.5),
+                                "needs_clarification": image_result.get("needs_clarification", False),
+                                "clarification_questions": image_result.get("clarification_questions"),
+                                "image_analysis": True,
+                                "image_name": image_result.get("image_name"),
+                                "image_size": image_result.get("image_size")
+                            }
+                            
+                            logger.debug(f"Diagnostic formed: answer length={len(diagnostic.get('answer', ''))}, relevant_articles count={len(diagnostic.get('relevant_articles', []))}")
+                        elif response.status_code == 503:
+                            # Сервис недоступен
+                            error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                            logger.error(f"Image diagnostic service unavailable (503): {error_detail}")
+                            st.error(f"⚠️ **Сервис анализа изображений недоступен**")
+                            st.warning(error_detail)
+                            st.info("**💡 Решение:**")
+                            st.markdown("""
+                            **Проверьте:**
+                            - Vision Analyzer (Gemini/Ollama) настроен в `config.env`
+                            - Gemini API ключ установлен или Ollama запущен
+                            - RetrievalAgent инициализирован
+                            """)
+                            st.stop()
+                        else:
+                            error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                            logger.error(f"Image diagnostic API error ({response.status_code}): {error_detail}")
+                            st.error(f"❌ Ошибка анализа изображения: {error_detail}")
+                            st.stop()
                     else:
-                        error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
-                        logger.error(f"API error ({response.status_code}): {error_detail}")
-                        st.error(f"❌ Ошибка API: {error_detail}")
-                        st.stop()
+                        # Обычный запрос без изображения
+                        response = client.post(
+                            f"{API_BASE_URL}/api/diagnose",
+                            json=request_data,
+                            timeout=diagnostic_timeout
+                        )
+                        
+                        logger.debug(f"Response status: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            diagnostic = response.json()
+                            logger.info(f"Diagnostic received successfully. Answer length: {len(diagnostic.get('answer', ''))}")
+                            logger.debug(f"Diagnostic response: {json.dumps(diagnostic, ensure_ascii=False, indent=2)}")
+                        elif response.status_code == 503:
+                            # Сервис недоступен (LLM не запущен)
+                            error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                            logger.error(f"LLM service unavailable (503): {error_detail}")
+                            st.error(f"⚠️ **LLM сервис недоступен**")
+                            st.warning(error_detail)
+                            st.info("**💡 Решение:**")
+                            st.markdown("""
+                            **Если используете Ollama:**
+                            ```bash
+                            ollama serve
+                            ```
+                            
+                            **Если используете Gemini/OpenAI:**
+                            - Проверьте, что `GEMINI_API_KEY` или `OPENAI_API_KEY` установлены в `config.env`
+                            - Убедитесь, что провайдер доступен
+                            
+                            **Изменить провайдер:**
+                            - Откройте `config.env`
+                            - Установите `LLM_PROVIDER=gemini` (или `openai`)
+                            - Перезапустите FastAPI сервер
+                            """)
+                            st.stop()
+                        else:
+                            error_detail = response.json().get('detail', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                            logger.error(f"API error ({response.status_code}): {error_detail}")
+                            st.error(f"❌ Ошибка API: {error_detail}")
+                            st.stop()
             except httpx.TimeoutException as e:
                 logger.error(f"Request timeout: {str(e)}")
                 st.error(f"⏱️ Превышено время ожидания ответа ({int(diagnostic_timeout)} секунд)")
@@ -789,43 +885,9 @@ if submitted:
                     - Проверьте логи сервера для получения дополнительной информации
                     """)
                     st.stop()
-        
-            # Отображение уверенности
-            confidence = diagnostic.get("confidence", 0.0)
-            if confidence < 0.7:
-                st.warning(f"⚠️ Уверенность в ответе: {confidence:.0%}. Могут потребоваться уточнения.")
             
-            # Уточняющие вопросы
-            if diagnostic.get("needs_clarification") and diagnostic.get("clarification_questions"):
-                st.markdown("---")
-                st.markdown("### ❓ Нужны уточнения")
-                
-                for i, question in enumerate(diagnostic["clarification_questions"]):
-                    st.markdown(f"**{i+1}. {question['question']}**")
-                    
-                    if question.get("options"):
-                        selected = st.radio(
-                            f"Выберите вариант:",
-                            question["options"],
-                            key=f"clarification_{i}",
-                            horizontal=True
-                        )
-                        
-                        # Сохранение ответа в контекст
-                        if question["question_type"] == "printer_model":
-                            st.session_state.user_context["printer_model"] = selected
-                        elif question["question_type"] == "material":
-                            st.session_state.user_context["material"] = selected
-            
-            # Релевантные статьи
-            if diagnostic.get("relevant_articles"):
-                st.markdown("---")
-                st.markdown("### 📚 Релевантные статьи из базы знаний")
-                
-                for article in diagnostic["relevant_articles"]:
-                    with st.expander(f"📄 {article.get('title', 'Без названия')} (релевантность: {article.get('score', 0):.2f})"):
-                        if article.get("url"):
-                            st.markdown(f"🔗 [Открыть статью]({article['url']})")
+            # Сохраняем результат диагностики в session_state для отображения после rerun
+            st.session_state.last_diagnostic = diagnostic
             
             # Добавление ответа в историю
             st.session_state.conversation_history.append({
@@ -843,6 +905,108 @@ if submitted:
         logger.warning(f"Form submitted but query is empty. submitted={submitted}, query={repr(query)}")
         st.warning("⚠️ Пожалуйста, введите описание проблемы перед отправкой формы.")
         st.info("💡 Вы можете выбрать пример из списка выше или ввести свой запрос вручную.")
+
+# Отображение результатов последней диагностики (после rerun)
+if "last_diagnostic" in st.session_state and not submitted:
+    diagnostic = st.session_state.last_diagnostic
+    
+    # Отображение ответа (если есть)
+    if diagnostic.get("answer"):
+        st.markdown("---")
+        st.markdown("### 💬 Ответ")
+        st.markdown(diagnostic.get("answer", ""))
+    
+    # Информация об анализе изображения
+    if diagnostic.get("image_analysis"):
+        st.markdown("---")
+        st.success(f"📸 Изображение проанализировано: {diagnostic.get('image_name', 'изображение')} ({diagnostic.get('image_size', 0) / 1024:.1f} KB)")
+        st.info("💡 Поиск выполнен с учетом контекста изображения для более точных результатов")
+    
+    # Отображение уверенности
+    confidence = diagnostic.get("confidence", 0.0)
+    if confidence < 0.7:
+        st.warning(f"⚠️ Уверенность в ответе: {confidence:.0%}. Могут потребоваться уточнения.")
+    
+    # Уточняющие вопросы
+    if diagnostic.get("needs_clarification") and diagnostic.get("clarification_questions"):
+        st.markdown("---")
+        st.markdown("### ❓ Нужны уточнения")
+        
+        for i, question in enumerate(diagnostic["clarification_questions"]):
+            st.markdown(f"**{i+1}. {question['question']}**")
+            
+            if question.get("options"):
+                selected = st.radio(
+                    f"Выберите вариант:",
+                    question["options"],
+                    key=f"clarification_{i}",
+                    horizontal=True
+                )
+                
+                # Сохранение ответа в контекст
+                if question["question_type"] == "printer_model":
+                    st.session_state.user_context["printer_model"] = selected
+                elif question["question_type"] == "material":
+                    st.session_state.user_context["material"] = selected
+    
+    # Релевантные статьи
+    relevant_articles = diagnostic.get("relevant_articles", [])
+    logger.debug(f"Displaying last diagnostic: relevant_articles count={len(relevant_articles)}")
+    
+    if relevant_articles:
+        st.markdown("---")
+        st.markdown("### 📚 Релевантные статьи из базы знаний")
+        
+        for i, article in enumerate(relevant_articles, 1):
+            score = article.get('score', 0)
+            rerank_score = article.get('rerank_score')
+            
+            # Формируем заголовок с информацией о релевантности
+            score_text = f"релевантность: {score:.3f}"
+            if rerank_score:
+                score_text += f" (re-rank: {rerank_score:.3f})"
+            
+            title = article.get('title', 'Без названия') or 'Без названия'
+            with st.expander(f"📄 {i}. {title} ({score_text})"):
+                if article.get("content"):
+                    # Показываем первые 500 символов контента
+                    content = article.get("content", "")
+                    if isinstance(content, str):
+                        content_preview = content[:500]
+                        if len(content) > 500:
+                            content_preview += "..."
+                        st.markdown(f"**Содержание:**\n{content_preview}")
+                
+                if article.get("problem_type"):
+                    st.markdown(f"**Тип проблемы:** `{article.get('problem_type')}`")
+                
+                printer_models = article.get("printer_models", [])
+                if printer_models:
+                    if isinstance(printer_models, list):
+                        st.markdown(f"**Принтеры:** {', '.join(printer_models)}")
+                    else:
+                        st.markdown(f"**Принтеры:** {printer_models}")
+                
+                materials = article.get("materials", [])
+                if materials:
+                    if isinstance(materials, list):
+                        st.markdown(f"**Материалы:** {', '.join(materials)}")
+                    else:
+                        st.markdown(f"**Материалы:** {materials}")
+                
+                url = article.get("url")
+                if url:
+                    st.markdown(f"🔗 [Открыть статью]({url})")
+                else:
+                    st.info("ℹ️ Ссылка на статью недоступна")
+    else:
+        # Если статей нет, но есть сообщение об успехе
+        if diagnostic.get("image_analysis"):
+            st.warning("⚠️ Статьи не найдены, но изображение было проанализировано. Попробуйте изменить запрос или фильтры.")
+    
+    # Очищаем last_diagnostic после отображения (чтобы не показывать повторно)
+    # Но оставляем для истории диалога
+    # del st.session_state.last_diagnostic
 
 # Инструкция
 with st.expander("📖 Как пользоваться"):

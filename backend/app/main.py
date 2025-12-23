@@ -1481,30 +1481,237 @@ async def diagnose_problem(request: DiagnosticRequest):
         raise HTTPException(status_code=500, detail=f"Ошибка диагностики: {error_msg}")
 
 
-@app.post("/api/diagnose/image")
+@app.post("/api/diagnose/image", response_class=JSONResponse)
 async def diagnose_with_image(
-    query: str,
-    printer_model: Optional[str] = None,
-    material: Optional[str] = None,
-    image: UploadFile = File(...)
+    query: str = Body(...),
+    printer_model: Optional[str] = Body(None),
+    material: Optional[str] = Body(None),
+    problem_type: Optional[str] = Body(None),
+    conversation_history: Optional[str] = Body(None),  # JSON строка
+    image: UploadFile = File(...),
+    use_reranking: Optional[str] = Body("true"),  # Строка из form-data
+    limit: Optional[str] = Body("5")  # Строка из form-data
 ):
     """
-    Диагностика с анализом изображения дефекта
+    Диагностика с анализом изображения дефекта через RetrievalAgent
+    
+    Использует RetrievalAgent для:
+    1. Анализа изображения через Vision Analyzer (Gemini/Ollama)
+    2. Извлечения контекста (problem_type, symptoms, description)
+    3. Поиска в KB с учетом контекста изображения
+    4. Реранкинга результатов для улучшения релевантности
     """
     try:
-        # TODO: Реализовать анализ изображения через Vision Agent
-        # Пока возвращаем базовую диагностику
+        # Импортируем RetrievalAgent
+        try:
+            from app.agents import get_retrieval_agent
+        except ImportError:
+            logger.error("RetrievalAgent недоступен")
+            raise HTTPException(status_code=503, detail="RetrievalAgent не инициализирован")
         
+        retrieval_agent = get_retrieval_agent()
+        
+        # Читаем изображение
+        image_data = await image.read()
+        
+        # Десериализуем conversation_history из JSON строки
+        parsed_history = None
+        if conversation_history:
+            try:
+                parsed_history = json.loads(conversation_history)
+                if not isinstance(parsed_history, list):
+                    parsed_history = None
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Не удалось распарсить conversation_history: {e}")
+                parsed_history = None
+        
+        # Конвертируем строковые параметры в нужные типы
+        use_reranking_bool = use_reranking.lower() == "true" if isinstance(use_reranking, str) else bool(use_reranking)
+        limit_int = int(limit) if isinstance(limit, str) else limit
+        
+        # Подготовка фильтров
+        filters = {}
+        if problem_type:
+            filters["problem_type"] = problem_type
+        if printer_model:
+            filters["printer_models"] = [printer_model]
+        if material:
+            filters["materials"] = [material]
+        
+        # Улучшение запроса с учетом истории диалога
+        enhanced_query = query
+        if parsed_history and len(parsed_history) > 0:
+            # Извлекаем предыдущие запросы и ответы из истории
+            previous_context = []
+            for msg in conversation_history[-3:]:  # Берем последние 3 сообщения
+                if isinstance(msg, dict):
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    if role == "user" and content:
+                        previous_context.append(f"Пользователь: {content}")
+                    elif role == "assistant" and content:
+                        previous_context.append(f"Система: {content[:200]}...")  # Ограничиваем длину
+            
+            if previous_context:
+                context_text = "\n".join(previous_context)
+                enhanced_query = f"{query}\n\nКонтекст предыдущего диалога:\n{context_text}"
+                logger.info(f"📝 Запрос улучшен с учетом истории диалога ({len(parsed_history)} сообщений)")
+        
+        # Поиск с анализом изображения через RetrievalAgent
+        logger.info(f"🔍 Поиск с изображением: query='{query}', filters={filters}, history_len={len(parsed_history) if parsed_history else 0}")
+        
+        search_results = await retrieval_agent.search_with_image(
+            query=enhanced_query,
+            image_data=image_data,
+            filters=filters if filters else None,
+            limit=limit_int,
+            use_reranking=use_reranking_bool
+        )
+        
+        # Получаем LLM клиент для генерации ответа
+        if get_llm_client is None:
+            raise HTTPException(status_code=503, detail="LLM сервис не инициализирован")
+        
+        llm_client = get_llm_client()
+        
+        # Формирование контекста из найденных статей
+        context = ""
+        if search_results:
+            # Берем топ-3 статьи для контекста
+            context_articles = search_results[:3]
+            context_parts = []
+            for i, article in enumerate(context_articles, 1):
+                title = article.get('title', 'Без названия')
+                content = article.get('content', '')
+                # Берем первые 800 символов контента
+                content_preview = content[:800] if len(content) > 800 else content
+                if len(content) > 800:
+                    content_preview += "..."
+                
+                article_text = f"Статья {i}: {title}\n{content_preview}"
+                
+                # Добавляем метаданные если есть
+                if article.get('problem_type'):
+                    article_text += f"\nТип проблемы: {article.get('problem_type')}"
+                if article.get('printer_models'):
+                    article_text += f"\nПринтеры: {', '.join(article.get('printer_models', []))}"
+                if article.get('materials'):
+                    article_text += f"\nМатериалы: {', '.join(article.get('materials', []))}"
+                
+                context_parts.append(article_text)
+            
+            context = "\n\n---\n\n".join(context_parts)
+        
+        # Формирование промпта для LLM
+        prompt = f"""Ты эксперт по диагностике проблем 3D-печати. Ты помогаешь пользователям решать их проблемы с эмпатией и пониманием.
+
+ЗАПРОС ПОЛЬЗОВАТЕЛЯ: {query}
+"""
+        
+        # Добавляем контекст из истории диалога, если есть
+        if parsed_history and len(parsed_history) > 0:
+            history_context = []
+            for msg in parsed_history[-3:]:  # Берем последние 3 сообщения
+                if isinstance(msg, dict):
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    if role == "user" and content:
+                        history_context.append(f"Пользователь ранее сказал: {content}")
+                    elif role == "assistant" and content:
+                        # Берем только краткую информацию из предыдущего ответа
+                        history_context.append(f"Ранее было рекомендовано: {content[:150]}...")
+            
+            if history_context:
+                prompt += f"\n\nКОНТЕКСТ ПРЕДЫДУЩЕГО ДИАЛОГА:\n" + "\n".join(history_context)
+        
+        if printer_model:
+            prompt += f"\nМОДЕЛЬ ПРИНТЕРА: {printer_model}"
+        
+        if material:
+            prompt += f"\nМАТЕРИАЛ: {material}"
+        
+        if problem_type:
+            prompt += f"\nТИП ПРОБЛЕМЫ: {problem_type}"
+        
+        if context:
+            prompt += f"\n\nРЕЛЕВАНТНЫЕ СТАТЬИ ИЗ БАЗЫ ЗНАНИЙ:\n{context}"
+        
+        prompt += """
+
+ЗАДАЧА:
+Используй информацию из статей выше, чтобы дать пользователю:
+1. Понимание проблемы (что происходит и почему)
+2. Конкретные решения с параметрами (температура, скорость, retraction и т.д.)
+3. Пошаговые рекомендации
+
+СТИЛЬ ОТВЕТА:
+- Будь эмпатичным и понимающим (пользователь столкнулся с проблемой)
+- Используй "ты" вместо "вы" для более дружелюбного тона
+- Объясняй простым языком, избегая излишнего технического жаргона
+- Структурируй ответ: сначала объясни проблему, потом дай решения
+- Укажи конкретные параметры (например: "уменьши температуру до 200°C")
+- Если нужно - дай несколько вариантов решения
+
+ВАЖНО:
+- НЕ просто перечисляй ссылки на статьи
+- НЕ копируй текст статей дословно
+- ДАЙ человеческий, понятный ответ на основе информации из статей
+- Используй информацию из статей как основу, но формулируй своими словами
+"""
+        
+        # Генерация ответа через LLM
+        try:
+            answer = await llm_client.generate(
+                prompt=prompt,
+                system_prompt="Ты эксперт по диагностике проблем 3D-печати. Отвечай эмпатично, понятно и конкретно, используя информацию из базы знаний.",
+                timeout=600  # Таймаут для LLM
+            )
+        except Exception as e:
+            logger.error(f"Ошибка генерации ответа через LLM: {e}")
+            # Fallback: формируем простой ответ на основе статей
+            if search_results:
+                top_article = search_results[0]
+                answer = f"На основе анализа изображения и базы знаний, похоже на проблему: {top_article.get('title', 'stringing')}. "
+                if top_article.get('solutions'):
+                    answer += "Рекомендации: "
+                    for sol in top_article.get('solutions', [])[:3]:
+                        answer += f"{sol.get('description', '')}; "
+            else:
+                answer = "К сожалению, не удалось найти релевантные статьи в базе знаний. Попробуйте описать проблему более подробно."
+        
+        # Оценка уверенности
+        confidence = 0.8 if search_results and search_results[0].get("score", 0) > 0.7 else 0.5
+        
+        # Определение необходимости уточнений
+        needs_clarification = False
+        clarification_questions = []
+        
+        if not printer_model and not any(p in query.lower() for p in ["ender", "prusa", "anycubic", "принтер"]):
+            needs_clarification = True
+            clarification_questions.append({
+                "question": "Какая у вас модель принтера?",
+                "question_type": "printer_model",
+                "options": None
+            })
+        
+        # Формируем ответ в формате DiagnosticResponse
         return {
-            "message": "Анализ изображений будет реализован в ШАГЕ 8",
+            "success": True,
+            "answer": answer,
             "query": query,
-            "printer_model": printer_model,
-            "material": material
+            "image_name": image.filename,
+            "image_size": len(image_data),
+            "relevant_articles": search_results[:5],  # Топ-5 статей как источники
+            "results_count": len(search_results),
+            "confidence": confidence,
+            "needs_clarification": needs_clarification,
+            "clarification_questions": clarification_questions if needs_clarification else None,
+            "image_analysis": True
         }
         
     except Exception as e:
         logger.error(f"Ошибка диагностики с изображением: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Ошибка диагностики с изображением: {str(e)}")
 
 
 # ========== СЛУЖЕБНЫЕ ENDPOINTS ==========

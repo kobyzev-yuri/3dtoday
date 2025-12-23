@@ -154,7 +154,16 @@ class VisionAnalyzer:
             # Кодируем в base64
             image_base64 = base64.b64encode(img_data).decode()
             
-            return self._analyze_with_gemini(image_base64, image_name)
+            gemini_result = self._analyze_with_gemini(image_base64, image_name)
+            
+            # Проверяем успешность результата Gemini
+            if gemini_result.get('success', False):
+                return gemini_result
+            else:
+                # Если Gemini вернул ошибку (например, модель не найдена), пробуем Ollama
+                error_msg = gemini_result.get('error', 'Unknown error')
+                logger.warning(f"⚠️ Gemini вернул ошибку: {error_msg}, пробуем Ollama/llava")
+                return self._analyze_with_ollama(image_data, image_name)
             
         except Exception as e:
             logger.error(f"❌ Ошибка анализа изображения через Gemini: {e}, пробуем Ollama/llava")
@@ -293,8 +302,9 @@ class VisionAnalyzer:
 """
         
         try:
+            # Используем v1beta для совместимости с ProxyAPI
             response = httpx.post(
-                f"{self.gemini_base_url}/v1/models/{self.gemini_model}:generateContent",
+                f"{self.gemini_base_url}/v1beta/models/{self.gemini_model}:generateContent",
                 headers={
                     "Authorization": f"Bearer {self.proxy_api_key}",
                     "Content-Type": "application/json"
@@ -405,8 +415,9 @@ class VisionAnalyzer:
         }
         
         try:
+            # Используем v1beta для совместимости с ProxyAPI (как в llm_client.py)
             response = httpx.post(
-                f"{self.gemini_base_url}/v1/models/{self.gemini_model}:generateContent",
+                f"{self.gemini_base_url}/v1beta/models/{self.gemini_model}:generateContent",
                 headers=headers,
                 json=payload,
                 timeout=30
@@ -423,9 +434,21 @@ class VisionAnalyzer:
                         'provider': 'gemini'
                     }
                 else:
-                    raise Exception(f'Неожиданный формат ответа Gemini: {result}')
+                    error_msg = f'Неожиданный формат ответа Gemini: {result}'
+                    logger.error(f"❌ {error_msg}")
+                    return {
+                        'success': False,
+                        'error': error_msg,
+                        'provider': 'gemini'
+                    }
             else:
-                raise Exception(f'Gemini API error: {response.status_code} - {response.text}')
+                error_msg = f'Gemini API error: {response.status_code} - {response.text}'
+                logger.error(f"❌ {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'provider': 'gemini'
+                }
                 
         except Exception as e:
             logger.error(f"❌ Ошибка анализа через Gemini: {e}")

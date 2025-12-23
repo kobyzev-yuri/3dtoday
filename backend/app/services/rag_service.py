@@ -116,11 +116,39 @@ class RAGService:
                 if r.get("score", 0.0) >= score_threshold
             ]
             
+            # Дедупликация по article_id или url
+            seen_ids = set()
+            seen_urls = set()
+            deduplicated_results = []
+            
+            for result in filtered_results:
+                article_id = result.get('article_id') or result.get('original_id')
+                url = result.get('url')
+                
+                # Проверяем уникальность по ID или URL
+                is_duplicate = False
+                if article_id and article_id in seen_ids:
+                    is_duplicate = True
+                elif url and url in seen_urls:
+                    is_duplicate = True
+                
+                if not is_duplicate:
+                    deduplicated_results.append(result)
+                    if article_id:
+                        seen_ids.add(article_id)
+                    if url:
+                        seen_urls.add(url)
+            
             # Сортировка по релевантности (по убыванию)
-            filtered_results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+            deduplicated_results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
             
             # Ограничение количества результатов
-            final_results = filtered_results[:limit]
+            final_results = deduplicated_results[:limit]
+            
+            if len(filtered_results) > len(deduplicated_results):
+                logger.info(
+                    f"🔍 Дедупликация: {len(filtered_results)} -> {len(deduplicated_results)} уникальных результатов"
+                )
             
             logger.info(
                 f"✅ Найдено результатов: {len(final_results)} "
@@ -193,12 +221,38 @@ class RAGService:
             
             boosted_results.append(result)
         
+        # Дедупликация результатов по article_id или url
+        seen_ids = set()
+        seen_urls = set()
+        deduplicated_results = []
+        
+        for result in boosted_results:
+            article_id = result.get('article_id') or result.get('original_id')
+            url = result.get('url')
+            
+            # Проверяем уникальность по ID или URL
+            is_duplicate = False
+            if article_id and article_id in seen_ids:
+                is_duplicate = True
+            elif url and url in seen_urls:
+                is_duplicate = True
+            
+            if not is_duplicate:
+                deduplicated_results.append(result)
+                if article_id:
+                    seen_ids.add(article_id)
+                if url:
+                    seen_urls.add(url)
+        
         # Повторная сортировка с учетом буста
-        boosted_results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+        deduplicated_results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
         
-        logger.info(f"✅ Гибридный поиск: применен буст к {sum(1 for r in boosted_results if r.get('boost_applied', 0) > 0)} результатам")
+        if len(boosted_results) > len(deduplicated_results):
+            logger.info(f"🔍 Дедупликация в hybrid_search: {len(boosted_results)} -> {len(deduplicated_results)} уникальных")
         
-        return boosted_results[:limit]
+        logger.info(f"✅ Гибридный поиск: применен буст к {sum(1 for r in deduplicated_results if r.get('boost_applied', 0) > 0)} результатам")
+        
+        return deduplicated_results[:limit]
 
 
 # Singleton instance
