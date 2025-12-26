@@ -70,3 +70,17 @@ class AddFromParseRequest(BaseModel):
     relevance_threshold: float = Field(0.6, description="Порог релевантности, установленный администратором")
 
 
+class ArticleUpdate(BaseModel):
+    """Модель для обновления статьи"""
+    title: Optional[str] = Field(None, description="Заголовок статьи")
+    content: Optional[str] = Field(None, description="Содержимое статьи")
+    url: Optional[str] = Field(None, description="URL статьи")
+    section: Optional[str] = Field(None, description="Раздел")
+    problem_type: Optional[str] = Field(None, description="Тип проблемы")
+    printer_models: Optional[List[str]] = Field(None, description="Список моделей принтеров")
+    materials: Optional[List[str]] = Field(None, description="Список материалов")
+    symptoms: Optional[List[str]] = Field(None, description="Список симптомов")
+    solutions: Optional[List[str]] = Field(None, description="Список решений")
+    regenerate_embedding: bool = Field(True, description="Регенерировать ли эмбеддинг")
+
+

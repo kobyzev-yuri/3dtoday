@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 try:
     from app.models.schemas import (
         ArticleInput,
+        ArticleUpdate,
         DiagnosticRequest,
         DiagnosticResponse,
         ValidationResponse,
@@ -32,6 +33,7 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from models.schemas import (
         ArticleInput,
+        ArticleUpdate,
         DiagnosticRequest,
         DiagnosticResponse,
         ValidationResponse,
@@ -933,6 +935,154 @@ async def list_articles(limit: int = 10, offset: int = 0):
         
     except Exception as e:
         logger.error(f"Ошибка получения списка статей: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/kb/articles/{article_id}", response_class=UnicodeJSONResponse)
+async def delete_article(article_id: str):
+    """
+    Удаление статьи по ID
+    
+    Args:
+        article_id: ID статьи
+    
+    Returns:
+        Результат удаления
+    """
+    try:
+        from services.vector_db import get_vector_db
+        
+        db = get_vector_db()
+        
+        success = await db.delete_article(article_id)
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Статья {article_id} успешно удалена",
+                "article_id": article_id
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Статья с ID {article_id} не найдена"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка удаления статьи: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/kb/articles/{article_id}", response_class=UnicodeJSONResponse)
+async def update_article(article_id: str, article_update: ArticleUpdate):
+    """
+    Обновление статьи по ID
+    
+    Args:
+        article_id: ID статьи
+        article_update: Данные для обновления
+    
+    Returns:
+        Обновленная статья
+    """
+    try:
+        from services.vector_db import get_vector_db
+        
+        db = get_vector_db()
+        
+        # Подготовка данных для обновления (только не-None поля)
+        update_data = {}
+        if article_update.title is not None:
+            update_data["title"] = article_update.title
+        if article_update.content is not None:
+            update_data["content"] = article_update.content
+        if article_update.url is not None:
+            update_data["url"] = article_update.url
+        if article_update.section is not None:
+            update_data["section"] = article_update.section
+        if article_update.problem_type is not None:
+            update_data["problem_type"] = article_update.problem_type
+        if article_update.printer_models is not None:
+            update_data["printer_models"] = article_update.printer_models
+        if article_update.materials is not None:
+            update_data["materials"] = article_update.materials
+        if article_update.symptoms is not None:
+            update_data["symptoms"] = article_update.symptoms
+        if article_update.solutions is not None:
+            update_data["solutions"] = article_update.solutions
+        
+        if not update_data:
+            raise HTTPException(
+                status_code=400,
+                detail="Не указаны поля для обновления"
+            )
+        
+        success = await db.update_article(
+            article_id=article_id,
+            article_data=update_data,
+            regenerate_embedding=article_update.regenerate_embedding
+        )
+        
+        if success:
+            # Получаем обновленную статью
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            filter_conditions = [
+                FieldCondition(
+                    key="article_id",
+                    match=MatchValue(value=article_id)
+                )
+            ]
+            
+            qdrant_filter = Filter(must=filter_conditions)
+            
+            result = db.client.scroll(
+                collection_name=db.collection_name,
+                scroll_filter=qdrant_filter,
+                limit=1,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            if result[0] and len(result[0]) > 0:
+                point = result[0][0]
+                article = point.payload
+                
+                return {
+                    "success": True,
+                    "message": f"Статья {article_id} успешно обновлена",
+                    "article": {
+                        "article_id": article.get("article_id") or article.get("original_id", "unknown"),
+                        "title": article.get("title", "Без названия"),
+                        "content": article.get("content", ""),
+                        "url": article.get("url"),
+                        "problem_type": article.get("problem_type"),
+                        "printer_models": article.get("printer_models", []),
+                        "materials": article.get("materials", []),
+                        "symptoms": article.get("symptoms", []),
+                        "solutions": article.get("solutions", []),
+                        "section": article.get("section"),
+                        "date": article.get("date"),
+                        "relevance_score": article.get("relevance_score")
+                    }
+                }
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Статья с ID {article_id} не найдена после обновления"
+                )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Статья с ID {article_id} не найдена"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка обновления статьи: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

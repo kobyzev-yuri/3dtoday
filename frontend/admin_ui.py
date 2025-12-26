@@ -28,7 +28,7 @@ st.set_page_config(
 st.title("📚 Управление базой знаний")
 
 # Вкладки для навигации
-tab1, tab2 = st.tabs(["➕ Добавление статей", "🧪 Инструкция по тестированию"])
+tab1, tab2, tab3 = st.tabs(["➕ Добавление статей", "📋 Управление статьями", "🧪 Инструкция по тестированию"])
 
 with tab1:
     # Проверка статуса успешного добавления (после rerun)
@@ -1903,8 +1903,301 @@ if st.session_state.get("use_parsed_document") and st.session_state.get("parsed_
     - Устаревшая информация
     """)
 
-# Вкладка 2: Инструкция по тестированию
+# Вкладка 2: Управление статьями
 with tab2:
+    st.header("📋 Управление статьями")
+    st.markdown("---")
+    
+    # Инициализация session state
+    if "articles_page" not in st.session_state:
+        st.session_state.articles_page = 0
+    if "articles_limit" not in st.session_state:
+        st.session_state.articles_limit = 10
+    if "selected_article_id" not in st.session_state:
+        st.session_state.selected_article_id = None
+    if "edit_mode" not in st.session_state:
+        st.session_state.edit_mode = False
+    
+    # Загрузка списка статей
+    @st.cache_data(ttl=60)  # Кэш на 60 секунд
+    def load_articles(limit: int, offset: int):
+        """Загрузка списка статей из API"""
+        try:
+            with httpx.Client(timeout=30) as client:
+                response = client.get(
+                    f"{API_BASE_URL}/api/kb/articles",
+                    params={"limit": limit, "offset": offset}
+                )
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    st.error(f"Ошибка загрузки статей: {response.status_code}")
+                    return None
+        except Exception as e:
+            st.error(f"Ошибка подключения к API: {e}")
+            return None
+    
+    # Загрузка полной статьи
+    def load_full_article(article_id: str):
+        """Загрузка полной статьи по ID"""
+        try:
+            with httpx.Client(timeout=30) as client:
+                response = client.get(f"{API_BASE_URL}/api/kb/articles/{article_id}")
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    st.error(f"Ошибка загрузки статьи: {response.status_code}")
+                    return None
+        except Exception as e:
+            st.error(f"Ошибка подключения к API: {e}")
+            return None
+    
+    # Удаление статьи
+    def delete_article(article_id: str):
+        """Удаление статьи"""
+        try:
+            with httpx.Client(timeout=30) as client:
+                response = client.delete(f"{API_BASE_URL}/api/kb/articles/{article_id}")
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    return {"success": False, "error": f"Ошибка: {response.status_code}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    # Обновление статьи
+    def update_article(article_id: str, update_data: dict):
+        """Обновление статьи"""
+        try:
+            with httpx.Client(timeout=60) as client:
+                response = client.put(
+                    f"{API_BASE_URL}/api/kb/articles/{article_id}",
+                    json=update_data
+                )
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    return {"success": False, "error": f"Ошибка: {response.status_code}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    # Колонки для управления
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("📚 Список статей")
+        
+        # Настройки пагинации
+        articles_limit = st.selectbox(
+            "Статей на странице:",
+            [5, 10, 20, 50],
+            index=1,
+            key="articles_limit_select"
+        )
+        st.session_state.articles_limit = articles_limit
+        
+        # Загрузка статей
+        offset = st.session_state.articles_page * articles_limit
+        articles_data = load_articles(articles_limit, offset)
+        
+        if articles_data and "articles" in articles_data:
+            articles = articles_data["articles"]
+            total = articles_data.get("total", 0)
+            
+            if articles:
+                st.info(f"Всего статей: {total} | Показано: {len(articles)}")
+                
+                # Таблица статей
+                for idx, article in enumerate(articles):
+                    with st.expander(f"📄 {article.get('title', 'Без названия')} | ID: `{article.get('article_id', 'N/A')}`"):
+                        col_a, col_b, col_c = st.columns([3, 1, 1])
+                        
+                        with col_a:
+                            st.write(f"**URL:** {article.get('url', 'N/A')}")
+                            st.write(f"**Раздел:** {article.get('section', 'N/A')}")
+                            st.write(f"**Тип проблемы:** {article.get('problem_type', 'N/A')}")
+                            st.write(f"**Превью:** {article.get('content_preview', '')[:300]}...")
+                        
+                        with col_b:
+                            if st.button("👁️ Просмотр", key=f"view_{article.get('article_id')}_{idx}"):
+                                st.session_state.selected_article_id = article.get('article_id')
+                                st.session_state.edit_mode = False
+                                st.rerun()
+                        
+                        with col_c:
+                            if st.button("✏️ Редактировать", key=f"edit_{article.get('article_id')}_{idx}"):
+                                st.session_state.selected_article_id = article.get('article_id')
+                                st.session_state.edit_mode = True
+                                st.rerun()
+                        
+                        # Кнопка удаления
+                        if st.button("🗑️ Удалить", key=f"delete_{article.get('article_id')}_{idx}", type="secondary"):
+                            if st.session_state.get(f"confirm_delete_{article.get('article_id')}", False):
+                                result = delete_article(article.get('article_id'))
+                                if result and result.get("success"):
+                                    st.success(f"✅ Статья {article.get('article_id')} удалена")
+                                    st.cache_data.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Ошибка удаления: {result.get('error', 'Неизвестная ошибка')}")
+                            else:
+                                st.session_state[f"confirm_delete_{article.get('article_id')}"] = True
+                                st.warning("⚠️ Нажмите еще раз для подтверждения удаления")
+                                st.rerun()
+                
+                # Пагинация
+                col_prev, col_info, col_next = st.columns([1, 2, 1])
+                with col_prev:
+                    if st.button("◀️ Предыдущая", disabled=st.session_state.articles_page == 0):
+                        st.session_state.articles_page -= 1
+                        st.rerun()
+                
+                with col_info:
+                    total_pages = (total + articles_limit - 1) // articles_limit if total > 0 else 1
+                    st.write(f"Страница {st.session_state.articles_page + 1} из {total_pages}")
+                
+                with col_next:
+                    if st.button("Следующая ▶️", disabled=(st.session_state.articles_page + 1) * articles_limit >= total):
+                        st.session_state.articles_page += 1
+                        st.rerun()
+            else:
+                st.info("📭 Статей не найдено")
+        else:
+            st.warning("⚠️ Не удалось загрузить статьи. Проверьте подключение к API.")
+    
+    with col2:
+        st.subheader("🔍 Действия")
+        
+        # Поиск по ID
+        search_id = st.text_input("Поиск по ID статьи:", key="search_article_id")
+        if st.button("🔍 Найти", key="search_button"):
+            if search_id:
+                st.session_state.selected_article_id = search_id
+                st.session_state.edit_mode = False
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Обновить список
+        if st.button("🔄 Обновить список"):
+            st.cache_data.clear()
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Просмотр/редактирование выбранной статьи
+    if st.session_state.selected_article_id:
+        st.subheader("📖 Детали статьи" if not st.session_state.edit_mode else "✏️ Редактирование статьи")
+        
+        article_data = load_full_article(st.session_state.selected_article_id)
+        
+        if article_data:
+            if st.session_state.edit_mode:
+                # Режим редактирования
+                with st.form("edit_article_form"):
+                    edit_title = st.text_input("Заголовок:", value=article_data.get("title", ""))
+                    edit_content = st.text_area("Содержимое:", value=article_data.get("content", ""), height=300)
+                    edit_url = st.text_input("URL:", value=article_data.get("url", ""))
+                    edit_section = st.text_input("Раздел:", value=article_data.get("section", ""))
+                    edit_problem_type = st.text_input("Тип проблемы:", value=article_data.get("problem_type", ""))
+                    
+                    # Списки
+                    col_list1, col_list2 = st.columns(2)
+                    with col_list1:
+                        edit_printer_models = st.text_area(
+                            "Модели принтеров (по одной на строку):",
+                            value="\n".join(article_data.get("printer_models", []))
+                        )
+                        edit_materials = st.text_area(
+                            "Материалы (по одному на строку):",
+                            value="\n".join(article_data.get("materials", []))
+                        )
+                    
+                    with col_list2:
+                        edit_symptoms = st.text_area(
+                            "Симптомы (по одному на строку):",
+                            value="\n".join(article_data.get("symptoms", []))
+                        )
+                        edit_solutions = st.text_area(
+                            "Решения (по одному на строку):",
+                            value="\n".join(article_data.get("solutions", []))
+                        )
+                    
+                    regenerate_embedding = st.checkbox("Регенерировать эмбеддинг", value=True)
+                    
+                    col_save, col_cancel = st.columns(2)
+                    with col_save:
+                        save_button = st.form_submit_button("💾 Сохранить изменения", type="primary")
+                    with col_cancel:
+                        cancel_button = st.form_submit_button("❌ Отмена")
+                    
+                    if save_button:
+                        # Подготовка данных для обновления
+                        update_data = {
+                            "title": edit_title,
+                            "content": edit_content,
+                            "url": edit_url,
+                            "section": edit_section,
+                            "problem_type": edit_problem_type,
+                            "printer_models": [m.strip() for m in edit_printer_models.split("\n") if m.strip()],
+                            "materials": [m.strip() for m in edit_materials.split("\n") if m.strip()],
+                            "symptoms": [s.strip() for s in edit_symptoms.split("\n") if s.strip()],
+                            "solutions": [s.strip() for s in edit_solutions.split("\n") if s.strip()],
+                            "regenerate_embedding": regenerate_embedding
+                        }
+                        
+                        result = update_article(st.session_state.selected_article_id, update_data)
+                        
+                        if result and result.get("success"):
+                            st.success("✅ Статья успешно обновлена!")
+                            st.cache_data.clear()
+                            st.session_state.edit_mode = False
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Ошибка обновления: {result.get('error', 'Неизвестная ошибка') if result else 'Нет ответа от сервера'}")
+                    
+                    if cancel_button:
+                        st.session_state.edit_mode = False
+                        st.rerun()
+            else:
+                # Режим просмотра
+                st.write(f"**ID:** `{article_data.get('article_id', 'N/A')}`")
+                st.write(f"**Заголовок:** {article_data.get('title', 'N/A')}")
+                st.write(f"**URL:** {article_data.get('url', 'N/A')}")
+                st.write(f"**Раздел:** {article_data.get('section', 'N/A')}")
+                st.write(f"**Тип проблемы:** {article_data.get('problem_type', 'N/A')}")
+                st.write(f"**Оценка релевантности:** {article_data.get('relevance_score', 'N/A')}")
+                
+                if article_data.get("printer_models"):
+                    st.write(f"**Модели принтеров:** {', '.join(article_data.get('printer_models', []))}")
+                if article_data.get("materials"):
+                    st.write(f"**Материалы:** {', '.join(article_data.get('materials', []))}")
+                if article_data.get("symptoms"):
+                    st.write(f"**Симптомы:** {', '.join(article_data.get('symptoms', []))}")
+                if article_data.get("solutions"):
+                    st.write(f"**Решения:** {', '.join(article_data.get('solutions', []))}")
+                
+                st.markdown("---")
+                st.write("**Содержимое:**")
+                st.text_area("", value=article_data.get("content", ""), height=400, disabled=True, key="view_content")
+                
+                col_view1, col_view2 = st.columns(2)
+                with col_view1:
+                    if st.button("✏️ Редактировать", key="edit_from_view"):
+                        st.session_state.edit_mode = True
+                        st.rerun()
+                with col_view2:
+                    if st.button("🔙 Назад к списку", key="back_to_list"):
+                        st.session_state.selected_article_id = None
+                        st.rerun()
+        else:
+            st.error(f"❌ Статья с ID {st.session_state.selected_article_id} не найдена")
+            if st.button("🔙 Назад к списку"):
+                st.session_state.selected_article_id = None
+                st.rerun()
+
+# Вкладка 3: Инструкция по тестированию
+with tab3:
     st.header("🧪 Инструкция по тестированию веб-интерфейса")
     st.markdown("---")
     

@@ -318,6 +318,175 @@ class VectorDBService:
             logger.error(f"❌ Ошибка получения статьи: {e}")
             return None
     
+    async def find_article_point(self, article_id: str) -> Optional[tuple]:
+        """
+        Поиск точки статьи по article_id в payload
+        
+        Args:
+            article_id: ID статьи из payload
+        
+        Returns:
+            Кортеж (point_id, payload) или None
+        """
+        try:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            
+            # Поиск по article_id в payload
+            filter_conditions = [
+                FieldCondition(
+                    key="article_id",
+                    match=MatchValue(value=article_id)
+                )
+            ]
+            
+            qdrant_filter = Filter(must=filter_conditions)
+            
+            result = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=qdrant_filter,
+                limit=1,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            if result[0] and len(result[0]) > 0:
+                point = result[0][0]
+                return (point.id, point.payload)
+            
+            # Пробуем найти по original_id
+            filter_conditions_orig = [
+                FieldCondition(
+                    key="original_id",
+                    match=MatchValue(value=article_id)
+                )
+            ]
+            
+            qdrant_filter_orig = Filter(must=filter_conditions_orig)
+            
+            result_orig = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=qdrant_filter_orig,
+                limit=1,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            if result_orig[0] and len(result_orig[0]) > 0:
+                point = result_orig[0][0]
+                return (point.id, point.payload)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка поиска статьи: {e}")
+            return None
+    
+    async def delete_article(self, article_id: str) -> bool:
+        """
+        Удаление статьи по ID
+        
+        Args:
+            article_id: ID статьи из payload
+        
+        Returns:
+            True если успешно удалено
+        """
+        try:
+            point_info = await self.find_article_point(article_id)
+            
+            if not point_info:
+                logger.warning(f"⚠️ Статья с ID {article_id} не найдена")
+                return False
+            
+            point_id, _ = point_info
+            
+            # Удаление точки
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=[point_id]
+            )
+            
+            logger.info(f"✅ Статья удалена: {article_id} (point_id: {point_id})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка удаления статьи: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    async def update_article(self, article_id: str, article_data: Dict[str, Any], regenerate_embedding: bool = True) -> bool:
+        """
+        Обновление статьи
+        
+        Args:
+            article_id: ID статьи из payload
+            article_data: Новые данные статьи
+            regenerate_embedding: Регенерировать ли эмбеддинг
+        
+        Returns:
+            True если успешно обновлено
+        """
+        try:
+            from services.rag_service import get_rag_service
+            
+            point_info = await self.find_article_point(article_id)
+            
+            if not point_info:
+                logger.warning(f"⚠️ Статья с ID {article_id} не найдена")
+                return False
+            
+            point_id, old_payload = point_info
+            
+            # Объединяем старые данные с новыми
+            updated_article = {**old_payload, **article_data}
+            
+            # Сохраняем article_id
+            updated_article["article_id"] = article_id
+            
+            # Генерация нового эмбеддинга, если нужно
+            if regenerate_embedding:
+                rag_service = get_rag_service()
+                text_for_embedding = f"{updated_article.get('title', '')} {updated_article.get('content', '')}"
+                embedding = rag_service.generate_embedding(text_for_embedding)
+            else:
+                # Используем старый эмбеддинг (нужно получить его из точки)
+                result = self.client.retrieve(
+                    collection_name=self.collection_name,
+                    ids=[point_id],
+                    with_vectors=True
+                )
+                if result and len(result) > 0:
+                    embedding = result[0].vector
+                else:
+                    # Если не удалось получить, генерируем новый
+                    rag_service = get_rag_service()
+                    text_for_embedding = f"{updated_article.get('title', '')} {updated_article.get('content', '')}"
+                    embedding = rag_service.generate_embedding(text_for_embedding)
+            
+            # Обновление точки через upsert
+            from qdrant_client.models import PointStruct
+            
+            point = PointStruct(
+                id=point_id,
+                vector=embedding,
+                payload=updated_article
+            )
+            
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=[point]
+            )
+            
+            logger.info(f"✅ Статья обновлена: {article_id} (point_id: {point_id})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка обновления статьи: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def get_statistics(self) -> Dict[str, Any]:
         """
         Получение статистики KB
